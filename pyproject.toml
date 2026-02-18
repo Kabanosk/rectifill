@@ -1,0 +1,14 @@
+[project]
+name = "rectifill"
+version = "0.1.0"
+description = "RectiFill: Rectified-Flow Speech Inpainting with T5 Guidance"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+	"torch",
+	"torchaudio",
+	"librosa",
+	"scipy",
+	"numpy",
+	"transformers",
+]
