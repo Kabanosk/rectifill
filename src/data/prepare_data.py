@@ -1,210 +1,166 @@
-import random
+import os
+import shutil
+import csv
 from pathlib import Path
-from typing import Optional
-
-
+import torch
 import torchaudio
+import torchaudio.transforms as T
 from tqdm import tqdm
-
-from .utils import load_wav, save_wav
+from loguru import logger
 
 
 def load_transcripts(source_dir: Path) -> dict[str, str]:
     """
-    Load all transcripts from LibriSpeech .trans.txt files.
-    Returns a dict mapping file_id (e.g. '211-122425-0000') to transcript text.
+    Scans the directory for .trans.txt files and creates an ID -> Text map.
     """
     transcripts = {}
+    logger.info(f"Searching for transcripts in: {source_dir}...")
+    # LibriSpeech has a folder structure, searching recursively for all .trans.txt files
     trans_files = list(source_dir.rglob("*.trans.txt"))
+
     for trans_file in trans_files:
         with open(trans_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
+                # Line format: "FILE_ID TRANSCRIPTION_TEXT"
                 parts = line.split(" ", 1)
                 if len(parts) == 2:
                     file_id, text = parts
                     transcripts[file_id] = text
+
+    logger.info(f"Found {len(transcripts)} transcript entries.")
     return transcripts
 
 
-def download_librispeech(target_dir: Path, split: str = "train-clean-100") -> None:
+def load_wav(wav_path: Path, target_sample_rate: int = 16000) -> torch.Tensor:
     """
-    Download LibriSpeech dataset using torchaudio.
-    :param target_dir: Directory to download and extract data
-    :param split: Which split to download (e.g. 'train-clean-100', 'dev-clean', 'test-clean')
+    Loads an audio file and resamples it if necessary.
+    (Based on the provided utils.py)
     """
-    print(f"Downloading LibriSpeech split '{split}' to {target_dir} ...")
-    torchaudio.datasets.LIBRISPEECH(str(target_dir), url=split, download=True)
-    print(f"LibriSpeech '{split}' downloaded to {target_dir}")
+    wav, sr = torchaudio.load(str(wav_path))
+    if sr != target_sample_rate:
+        resampler = T.Resample(orig_freq=sr, new_freq=target_sample_rate)
+        wav = resampler(wav)
+    return wav
 
 
-def resample_wav(input_dir: Path, output_dir: Path, sample_rate: int = 16000, transcripts: dict[str, str] | None = None) -> None:
-    """Resample all WAV files in input_dir to output_dir at sample_rate and save transcripts."""
-    input_dir = Path(input_dir)
+def save_wav(wav_path: Path, wav: torch.Tensor, sample_rate: int = 16000) -> None:
+    """
+    Saves a tensor as a WAV file.
+    """
+    # Ensure the directory exists
+    wav_path.parent.mkdir(parents=True, exist_ok=True)
+    torchaudio.save(str(wav_path), wav, sample_rate)
+
+
+def process_audio_and_text(
+        source_dir: Path,
+        output_dir: Path,
+        target_sample_rate: int = 16000
+) -> None:
+    """
+    Processes audio files (resampling) and saves .wav + .txt pairs.
+    """
+    source_dir = Path(source_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    wav_files = list(input_dir.rglob("*.flac"))
-    for wav_path in tqdm(wav_files, desc="Resampling audio"):
-        wav = load_wav(wav_path, sample_rate)
-        out_path = output_dir / wav_path.name
-        save_wav(out_path, wav, sample_rate)
-        # Save transcript as .txt file with the same name
-        if transcripts is not None:
-            file_id = wav_path.stem  # e.g., '211-122425-0000'
-            if file_id in transcripts:
-                txt_path = output_dir / f"{file_id}.txt"
-                txt_path.write_text(transcripts[file_id], encoding="utf-8")
-    print(f"Resampled {len(wav_files)} files to {output_dir}")
 
-def split_train_val(dataset_dir: Path, val_ratio: float = 0.1, seed: int = 42) -> None:
-    """Split WAV files and their transcripts in dataset_dir into train/val subfolders."""
-    dataset_dir = Path(dataset_dir)
-    # Only get flac files directly in dataset_dir, not in subdirectories
-    wav_files = sorted([f for f in dataset_dir.glob("*.flac")])
-    print(len(wav_files))
-    random.seed(seed)
-    random.shuffle(wav_files)
-    n_val = int(len(wav_files) * val_ratio)
-    val_files = wav_files[:n_val]
-    train_files = wav_files[n_val:]
-    (dataset_dir / "train").mkdir(parents=True, exist_ok=True)
-    (dataset_dir / "val").mkdir(parents=True, exist_ok=True)
-    for f in tqdm(train_files, desc="Copying train"):
-        # Copy audio file
-        (dataset_dir / "train" / f.name).write_bytes(f.read_bytes())
-        # Copy corresponding transcript file
-        txt_file = f.with_suffix(".txt")
-        if txt_file.exists():
-            (dataset_dir / "train" / txt_file.name).write_text(txt_file.read_text(encoding="utf-8"), encoding="utf-8")
-    for f in tqdm(val_files, desc="Copying val"):
-        # Copy audio file
-        (dataset_dir / "val" / f.name).write_bytes(f.read_bytes())
-        # Copy corresponding transcript file
-        txt_file = f.with_suffix(".txt")
-        if txt_file.exists():
-            (dataset_dir / "val" / txt_file.name).write_text(txt_file.read_text(encoding="utf-8"), encoding="utf-8")
-    print(f"Split {len(wav_files)} files: {len(train_files)} train, {len(val_files)} val")
-
-
-def split_train_val_test(dataset_dir: Path, val_ratio: float = 0.1, test_ratio: float = 0.1, seed: int = 42) -> None:
-    """Split WAV files and their transcripts in dataset_dir into train/val/test subfolders."""
-    dataset_dir = Path(dataset_dir)
-    # Only get flac files directly in dataset_dir, not in subdirectories
-    wav_files = sorted([f for f in dataset_dir.glob("*.flac")])
-    print(len(wav_files))
-    random.seed(seed)
-    random.shuffle(wav_files)
-    
-    n_test = int(len(wav_files) * test_ratio)
-    n_val = int(len(wav_files) * val_ratio)
-    
-    test_files = wav_files[:n_test]
-    val_files = wav_files[n_test:n_test + n_val]
-    train_files = wav_files[n_test + n_val:]
-    
-    (dataset_dir / "train").mkdir(parents=True, exist_ok=True)
-    (dataset_dir / "val").mkdir(parents=True, exist_ok=True)
-    (dataset_dir / "test").mkdir(parents=True, exist_ok=True)
-    
-    for f in tqdm(train_files, desc="Copying train"):
-        # Copy audio file
-        (dataset_dir / "train" / f.name).write_bytes(f.read_bytes())
-        # Copy corresponding transcript file
-        txt_file = f.with_suffix(".txt")
-        if txt_file.exists():
-            (dataset_dir / "train" / txt_file.name).write_text(txt_file.read_text(encoding="utf-8"), encoding="utf-8")
-    
-    for f in tqdm(val_files, desc="Copying val"):
-        # Copy audio file
-        (dataset_dir / "val" / f.name).write_bytes(f.read_bytes())
-        # Copy corresponding transcript file
-        txt_file = f.with_suffix(".txt")
-        if txt_file.exists():
-            (dataset_dir / "val" / txt_file.name).write_text(txt_file.read_text(encoding="utf-8"), encoding="utf-8")
-    
-    for f in tqdm(test_files, desc="Copying test"):
-        # Copy audio file
-        (dataset_dir / "test" / f.name).write_bytes(f.read_bytes())
-        # Copy corresponding transcript file
-        txt_file = f.with_suffix(".txt")
-        if txt_file.exists():
-            (dataset_dir / "test" / txt_file.name).write_text(txt_file.read_text(encoding="utf-8"), encoding="utf-8")
-    
-    print(f"Split {len(wav_files)} files: {len(train_files)} train, {len(val_files)} val, {len(test_files)} test")
-
-
-def copy_to_test(dataset_dir: Path) -> None:
-    """Copy all WAV files and transcripts in dataset_dir to test subfolder (for dedicated test sets)."""
-    dataset_dir = Path(dataset_dir)
-    wav_files = sorted([f for f in dataset_dir.glob("*.flac")])
-    print(f"Found {len(wav_files)} files for test set")
-    
-    (dataset_dir / "test").mkdir(parents=True, exist_ok=True)
-    
-    for f in tqdm(wav_files, desc="Copying test"):
-        # Copy audio file
-        (dataset_dir / "test" / f.name).write_bytes(f.read_bytes())
-        # Copy corresponding transcript file
-        txt_file = f.with_suffix(".txt")
-        if txt_file.exists():
-            (dataset_dir / "test" / txt_file.name).write_text(txt_file.read_text(encoding="utf-8"), encoding="utf-8")
-    
-    print(f"Copied {len(wav_files)} files to test/")
-
-
-def prepare_dataset(source_dir: Path, target_dir: Path, sample_rate: int = 16000, val_ratio: float = 0.1, test_ratio: float = 0.0, librispeech: bool = False, librispeech_split: str = "train-clean-100") -> None:
-    """
-    Run full pipeline: download (optional), resample, split train/val/test.
-    :param source_dir: Directory with raw or intermediate dataset
-    :param target_dir: Directory to write the final prepared dataset
-    :param sample_rate: Target sampling rate for audio files
-    :param val_ratio: Validation split ratio
-    :param test_ratio: Test split ratio (if 0, no test split)
-    :param librispeech: If True, download LibriSpeech to source_dir first
-    :param librispeech_split: Which LibriSpeech split to download
-    """
-    source_dir.mkdir(parents=True, exist_ok=True)
-    if librispeech:
-        download_librispeech(source_dir, librispeech_split)
-    target_dir = Path(target_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    # Load transcripts from source directory
+    # 1. First, load all texts into memory
     transcripts = load_transcripts(source_dir)
-    print(f"Loaded {len(transcripts)} transcripts")
-    resample_wav(source_dir, target_dir, sample_rate, transcripts)
-    if test_ratio > 0:
-        split_train_val_test(target_dir, val_ratio, test_ratio)
-    else:
-        split_train_val(target_dir, val_ratio)
-    print(f"Prepared dataset in {target_dir}")
+
+    # 2. Find all FLAC files
+    flac_files = list(source_dir.rglob("*.flac"))
+    logger.info(f"Found {len(flac_files)} audio files. Processing...")
+
+    # Prepare list for metadata.csv
+    metadata = []
+
+    # Progress bar
+    for flac_path in tqdm(flac_files, desc="Converting"):
+        file_id = flac_path.stem  # e.g., '1272-128104-0000'
+
+        # Check if we have text for this file
+        if file_id not in transcripts:
+            # Optional: uncomment to see missing files
+            # logger.warning(f"No transcript for {file_id}, skipping.")
+            continue
+
+        text_content = transcripts[file_id]
+
+        # --- Audio Processing ---
+        # Using built-in helper functions (modeled after utils.py)
+        try:
+            waveform = load_wav(flac_path, target_sample_rate)
+
+            output_wav_path = output_dir / f"{file_id}.wav"
+            save_wav(output_wav_path, waveform, target_sample_rate)
+
+            # --- Text Saving ---
+            output_txt_path = output_dir / f"{file_id}.txt"
+            with open(output_txt_path, "w", encoding="utf-8") as f:
+                f.write(text_content)
+
+            # Add to metadata (filename | text)
+            metadata.append([f"{file_id}.wav", text_content])
+
+        except Exception as e:
+            logger.error(f"Error processing file {flac_path}: {e}")
+
+    # --- Saving METADATA.CSV ---
+    csv_path = output_dir / "metadata.csv"
+    with open(csv_path, "w", encoding="utf-8", newline="") as csvfile:
+        writer = csv.writer(csvfile, delimiter="|")
+        writer.writerow(["file_name", "transcription"])
+        writer.writerows(metadata)
+
+    logger.success(f"Done! Data saved in: {output_dir}")
+    logger.info(f"Created .wav + .txt pairs and metadata.csv")
 
 
-def prepare_test_dataset(source_dir: Path, target_dir: Path, sample_rate: int = 16000, librispeech: bool = False, librispeech_split: str = "test-clean") -> None:
+def download_and_prepare(
+        root_dir: str,
+        dataset_type: str = "dev-clean"
+) -> None:
     """
-    Prepare a dedicated test dataset (no train/val split, all files go to test/).
-    :param source_dir: Directory with raw or intermediate dataset
-    :param target_dir: Directory to write the final prepared dataset
-    :param sample_rate: Target sampling rate for audio files
-    :param librispeech: If True, download LibriSpeech to source_dir first
-    :param librispeech_split: Which LibriSpeech split to download
+    Main function orchestrating download and processing.
     """
-    source_dir.mkdir(parents=True, exist_ok=True)
-    if librispeech:
-        download_librispeech(source_dir, librispeech_split)
-    target_dir = Path(target_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    # Load transcripts from source directory
-    transcripts = load_transcripts(source_dir)
-    print(f"Loaded {len(transcripts)} transcripts")
-    resample_wav(source_dir, target_dir, sample_rate, transcripts)
-    copy_to_test(target_dir)
-    print(f"Prepared test dataset in {target_dir}")
+    root_path = Path(root_dir)
+    raw_path = root_path / "raw"
+    processed_path = root_path / "processed" / dataset_type
+
+    logger.info(f"--- Starting work on dataset: {dataset_type} ---")
+
+    # 1. Downloading (torchaudio checks if files exist)
+    logger.info(f"Downloading to {raw_path} (if not exists)...")
+    try:
+        dataset = torchaudio.datasets.LIBRISPEECH(
+            root=str(raw_path),
+            url=dataset_type,
+            download=True
+        )
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        return
+
+    # Path where torchaudio extracted the files
+    # Usually: raw/LibriSpeech/dev-clean
+    extracted_path = raw_path / "LibriSpeech" / dataset_type
+
+    # 2. Processing
+    process_audio_and_text(extracted_path, processed_path)
 
 
 if __name__ == "__main__":
-    prepare_dataset(Path("data/raw"), Path("data/processed"), sample_rate=16000, val_ratio=0.1, librispeech=True, librispeech_split="train-clean-100")
-    prepare_dataset(Path("data/raw_val"), Path("data/processed_val"), sample_rate=16000, val_ratio=0.1, librispeech=True, librispeech_split="dev-clean")
-    prepare_test_dataset(Path("data/raw_test"), Path("data/processed_test"), sample_rate=16000, librispeech=True, librispeech_split="test-clean")
-    print("Data preparation complete.")
+    # Directory configuration
+    DATA_ROOT = "data"
+
+    # --- VALIDATION SET ---
+    download_and_prepare(DATA_ROOT, dataset_type="dev-clean")
+
+    # --- TRAINING SET ---
+    download_and_prepare(DATA_ROOT, dataset_type="train-clean-100")
+
+    # --- TEST SET ---
+    download_and_prepare(DATA_ROOT, dataset_type="test-clean")
