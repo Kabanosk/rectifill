@@ -13,4 +13,5 @@ dependencies = [
 	"numpy",
 	"transformers",
 	"loguru>=0.7.3",
+	"ruff>=0.15.1",
 ]

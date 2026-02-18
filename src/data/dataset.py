@@ -16,7 +16,6 @@ class LibriSpeechCollator:
     Class responsible for batch preparation (Dynamic Padding).
     Adjusts the batch length to the LONGEST element in THIS SPECIFIC batch.
     """
-
     def __call__(self, batch):
         batch = [item for item in batch if item is not None]
         if len(batch) == 0:
@@ -46,7 +45,6 @@ class LibriSpeechDataset(Dataset):
     PyTorch Dataset for loading the processed LibriSpeech data.
     Now supports transformations (augmentations).
     """
-
     def __init__(self, data_dir: str | Path, transform: Optional[Callable] = None, max_length: Optional[int] = None):
         """Initializes the dataset by loading metadata and preparing file paths.
 

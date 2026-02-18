@@ -1,5 +1,3 @@
-import os
-import shutil
 import csv
 from pathlib import Path
 import torch
@@ -116,7 +114,7 @@ def process_audio_and_text(
         writer.writerows(metadata)
 
     logger.success(f"Done! Data saved in: {output_dir}")
-    logger.info(f"Created .wav + .txt pairs and metadata.csv")
+    logger.info("Created .wav + .txt pairs and metadata.csv")
 
 
 def download_and_prepare(
@@ -135,7 +133,7 @@ def download_and_prepare(
     # 1. Downloading (torchaudio checks if files exist)
     logger.info(f"Downloading to {raw_path} (if not exists)...")
     try:
-        dataset = torchaudio.datasets.LIBRISPEECH(
+        _ = torchaudio.datasets.LIBRISPEECH(
             root=str(raw_path),
             url=dataset_type,
             download=True
