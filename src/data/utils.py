@@ -1,5 +1,6 @@
 import torch
 import torchaudio
+import torchaudio.transforms as T
 
 
 def load_wav(wav_path, sample_rate=16000) -> torch.Tensor:
@@ -23,3 +24,25 @@ def save_wav(wav_path, wav, sample_rate=16000) -> None:
     :param sample_rate: Sample rate for the output WAV file (default: 16000).
     """
     torchaudio.save(wav_path, wav, sample_rate)
+
+
+def get_mel_transform(sample_rate=16000, n_mels=128) -> torch.nn.Sequential:
+    """Creates a transform to convert audio waveforms into Log-Mel-Spectrograms.
+
+    Uses AmplitudeToDB to compress the dynamic range, which is crucial for
+    generative models and stable training.
+
+    :param sample_rate: Expected sample rate of the audio (default: 16000).
+    :param n_mels: Number of mel filterbanks (default: 128).
+    :return: A Sequential PyTorch module applying MelSpectrogram then AmplitudeToDB.
+    """
+    mel_spectrogram = T.MelSpectrogram(
+        sample_rate=sample_rate,
+        n_fft=1024,
+        hop_length=512,
+        n_mels=n_mels,
+        normalized=True
+    )
+    amplitude_to_db = T.AmplitudeToDB()
+
+    return torch.nn.Sequential(mel_spectrogram, amplitude_to_db)
