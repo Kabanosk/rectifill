@@ -35,6 +35,20 @@ class DataConfig:
 
 
 @dataclasses.dataclass
+class ModelConfig:
+    # Architecture dimensions
+    hidden_size: int = 256
+    depth: int = 6
+    num_heads: int = 8
+    dropout: float = 0.1
+
+    # Audio & Text
+    mel_bins: int = 128
+    text_dim: int = 768
+    max_seq_len: int = 4000
+
+
+@dataclasses.dataclass
 class TrainConfig:
     """Configuration for the training process."""
     model_name: str = "interpolate"  # Options: "interpolate", "rfm_dit"
@@ -44,16 +58,4 @@ class TrainConfig:
     checkpoint_path: str = "checkpoints"
     log_interval: int = 100
 
-@dataclasses.dataclass
-class ModelConfig:
-    # Architecture dimensions
-    hidden_size: int = 768
-    depth: int = 12
-    num_heads: int = 12
-
-    # Patching logic
-    patch_size: int = 8
-    input_channels: int = 1
-
-    # Other
-    dropout: float = 0.1
+    model_params: ModelConfig = dataclasses.field(default_factory=ModelConfig)
