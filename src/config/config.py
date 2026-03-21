@@ -25,6 +25,7 @@ class DataConfig:
     num_workers: int = 4
     shuffle: bool = True
     drop_last: bool = False
+    pin_memory: bool = True
 
     mel_params: MelConfig = dataclasses.field(default_factory=MelConfig)
     text_params: TextConfig = dataclasses.field(default_factory=TextConfig)
