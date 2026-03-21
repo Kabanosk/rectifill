@@ -5,7 +5,7 @@ import torch
 from loguru import logger
 from tqdm import tqdm
 
-from src.config.config import DataConfig, TrainConfig
+from src.config.config import DataConfig, MelConfig, ModelConfig, TrainConfig
 from src.data.dataset import get_dataloader
 from src.model import get_model
 
@@ -52,6 +52,11 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     logger.info("Initializing configurations and DataLoaders...")
+
+    mel_params = MelConfig()
+    model_config = ModelConfig()
+    assert mel_params.n_mels % model_config.patch_size == 0, \
+        f"n_mels ({mel_params.n_mels}) must be divisible by patch_size ({model_config.patch_size}) for proper patching."
 
     train_data_config = DataConfig(
         data_path=args.train_data,
@@ -101,13 +106,11 @@ def main():
         train_start_time = time.time()
         train_loss_accumulated = 0.0
 
-        train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch}:", leave=True)
+        train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch}", leave=True)
         for batch_idx, batch in enumerate(train_pbar):
             mel = batch['mel'].to(train_config.device)
             mask = batch['inpainting_mask'].to(train_config.device)
             text_emb = batch['embedding'].to(train_config.device)
-            if batch_idx % train_config.log_interval == 0:
-                logger.info(f"mel={mel.shape} | mask={mask.shape} | embedding={text_emb.shape}")
 
             if optimizer is not None:
                 optimizer.zero_grad()
@@ -149,7 +152,7 @@ def main():
 
         logger.info(f"Epoch {epoch} Validation Time: {val_time:.2f}s | Avg Val Loss: {avg_val_loss:.4f}")
 
-    logger.success("Training completely finished na essie! 🚀")
+    logger.success("Training finished! 🚀")
 
 
 if __name__ == "__main__":

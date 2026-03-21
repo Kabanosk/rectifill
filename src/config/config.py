@@ -43,3 +43,17 @@ class TrainConfig:
     device: str = "cuda"
     checkpoint_path: str = "checkpoints"
     log_interval: int = 100
+
+@dataclasses.dataclass
+class ModelConfig:
+    # Architecture dimensions
+    hidden_size: int = 768
+    depth: int = 12
+    num_heads: int = 12
+
+    # Patching logic
+    patch_size: int = 8
+    input_channels: int = 1
+
+    # Other
+    dropout: float = 0.1
