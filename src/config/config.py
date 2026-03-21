@@ -20,7 +20,7 @@ class TextConfig:
 @dataclasses.dataclass
 class DataConfig:
     """Main data configuration for the dataset and dataloaders."""
-    data_path: str | pathlib.Path
+    data_path: str | pathlib.Path = "data"
     batch_size: int = 32
     num_workers: int = 4
     shuffle: bool = True
@@ -37,8 +37,9 @@ class DataConfig:
 @dataclasses.dataclass
 class TrainConfig:
     """Configuration for the training process."""
+    model_name: str = "interpolate"  # Options: "interpolate", "rfm_dit"
     epochs: int = 10
     learning_rate: float = 3e-4
     device: str = "cuda"
     checkpoint_path: str = "checkpoints"
-    log_interval: int = 10
+    log_interval: int = 100
