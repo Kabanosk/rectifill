@@ -51,7 +51,7 @@ class ModelConfig:
 @dataclasses.dataclass
 class TrainConfig:
     """Configuration for the training process."""
-    model_name: str = "interpolate"  # Options: "interpolate", "rfm_dit"
+    model_name: str = "rfm_dit"
     epochs: int = 10
     learning_rate: float = 3e-4
     device: str = "cuda"

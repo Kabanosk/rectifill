@@ -66,7 +66,7 @@ class LibriSpeechCollator:
         text_lengths = torch.tensor([emb.shape[0] for emb in embeddings], dtype=torch.long)
         max_text_len = embeddings_tensor.shape[1]
         text_masks_tensor = (
-                torch.arange(max_text_len).expand(len(text_lengths), max_text_len) < text_lengths.unsqueeze(1)
+                torch.arange(max_text_len).expand(len(text_lengths), max_text_len) >= text_lengths.unsqueeze(1)
         )
 
         return {
