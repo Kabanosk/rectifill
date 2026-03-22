@@ -21,7 +21,7 @@ class TextConfig:
 class DataConfig:
     """Main data configuration for the dataset and dataloaders."""
     data_path: str | pathlib.Path = "data"
-    batch_size: int = 32
+    batch_size: int = 16
     num_workers: int = 4
     shuffle: bool = True
     drop_last: bool = False
