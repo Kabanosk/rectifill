@@ -98,16 +98,20 @@ def parse_args() -> argparse.Namespace:
     # --- Training Arguments ---
     parser.add_argument("--model_name", type=str, default="rfm_dit",
                         help="Model architecture to use (e.g., 'interpolate', 'rfm_dit').")
-    parser.add_argument("--epochs", type=int, default=default_train.epochs,
-                        help="Number of training epochs.")
-    parser.add_argument("--learning_rate", type=float, default=default_train.learning_rate,
-                        help="Learning rate for the optimizer.")
     parser.add_argument("--device", type=str, default=default_train.device,
                         help="Compute device.")
     parser.add_argument("--checkpoint_path", type=str, default=default_train.checkpoint_path,
                         help="Checkpoint directory path.")
     parser.add_argument("--log_interval", type=int, default=default_train.log_interval,
                         help="Interval (in batches) for logging training progress.")
+    parser.add_argument("--epochs", type=int, default=default_train.epochs,
+                        help="Number of training epochs.")
+    parser.add_argument("--learning_rate", type=float, default=default_train.learning_rate,
+                        help="Learning rate for the optimizer.")
+    parser.add_argument("--weight_decay", type=float, default=default_train.weight_decay,
+                        help="Weight decay for optimizer (L2 regularization).")
+    parser.add_argument("--gradient_clip_val", type=float, default=default_train.gradient_clip_val,
+                        help="Max norm for gradient clipping.")
 
     return parser.parse_args()
 
@@ -146,13 +150,19 @@ def main():
         model_name=args.model_name,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        gradient_clip_val=args.gradient_clip_val,
         device=args.device,
         checkpoint_path=args.checkpoint_path,
         log_interval=args.log_interval
     )
 
     model = get_model(train_config.model_name, train_config.model_params).to(train_config.device)
-    optimizer = model.configure_optimizers(lr=train_config.learning_rate)
+    optimizer = model.configure_optimizers(
+        lr=train_config.learning_rate,
+        weight_decay=train_config.weight_decay
+    )
+
     logger.info(f"Loaded model [{train_config.model_name}] and moved to {train_config.device}")
 
     # ==========================================
@@ -193,6 +203,11 @@ def main():
             # --- BACKPROPAGATION ---
             if optimizer is not None:
                 masked_loss.backward()
+
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    max_norm=train_config.gradient_clip_val
+                )
                 optimizer.step()
 
             train_loss_accumulated += masked_loss.item()

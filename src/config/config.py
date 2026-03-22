@@ -52,10 +52,13 @@ class ModelConfig:
 class TrainConfig:
     """Configuration for the training process."""
     model_name: str = "rfm_dit"
-    epochs: int = 10
-    learning_rate: float = 3e-4
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints"
+    checkpoint_path: str = "checkpoints/run_01_full_rfm"
     log_interval: int = 100
+    epochs: int = 100
+
+    learning_rate: float = 3e-4
+    weight_decay: float = 1e-2
+    gradient_clip_val: float = 1.0
 
     model_params: ModelConfig = dataclasses.field(default_factory=ModelConfig)
