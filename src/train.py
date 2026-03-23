@@ -1,4 +1,5 @@
 import argparse
+import dataclasses
 import random
 import time
 from pathlib import Path
@@ -9,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
+import wandb
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from loguru import logger
 from tqdm import tqdm
@@ -16,31 +18,6 @@ from tqdm import tqdm
 from src.config.config import DataConfig, TrainConfig
 from src.data.dataset import get_dataloader
 from src.model import get_model
-
-
-def save_loss_plot(train_losses: list[float], val_losses: list[float], output_path: Path):
-    """
-    Generates and saves a plot of training and validation losses.
-    """
-    plt.figure(figsize=(10, 6))
-    epochs = range(1, len(train_losses) + 1)
-
-    plt.plot(epochs, train_losses, label='Train Loss', marker='o', linestyle='-', color='b')
-    if val_losses and len(val_losses) == len(train_losses):
-        plt.plot(epochs, val_losses, label='Validation Loss', marker='s', linestyle='--', color='r')
-
-    plt.title('Rectified Flow Matching - Training vs Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss (Masked)')
-    plt.legend()
-    plt.grid(True, linestyle=':', alpha=0.7)
-
-    # Force x-axis to show integer epochs
-    plt.xticks(epochs)
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
-    plt.close()
 
 
 def prepare_rfm_batch(
@@ -176,6 +153,14 @@ def main():
     )
     val_loader = get_dataloader(val_data_config)
 
+    if train_config.wandb_params.use_wandb:
+        logger.info("Initializing Weights & Biases...")
+        config = dataclasses.asdict(train_config) | dataclasses.asdict(train_data_config)
+        wandb.init(
+            project=train_config.wandb_params.project_name,
+            config=config
+        )
+
     logger.info(f"Train batches per epoch: {len(train_loader)}")
     logger.info(f"Val batches per epoch: {len(val_loader)}")
 
@@ -258,6 +243,14 @@ def main():
             current_lr = scheduler.get_last_lr()[0] if scheduler else train_config.learning_rate
             train_pbar.set_postfix({"loss": f"{masked_loss.item():.4f}", "lr": f"{current_lr:.2e}"})
 
+            if train_config.wandb_params.use_wandb and batch_idx % train_config.log_interval == 0:
+                global_step = (epoch - 1) * len(train_loader) + batch_idx
+                wandb.log({
+                    "train/batch_loss": masked_loss.item(),
+                    "train/learning_rate": current_lr,
+                    "global_step": global_step
+                })
+
         train_time = time.time() - train_start_time
         avg_train_loss = train_loss_accumulated / len(train_loader)
         history_train_loss.append(avg_train_loss)
@@ -304,6 +297,13 @@ def main():
         avg_val_loss = val_loss_accumulated / len(val_loader) if len(val_loader) > 0 else 0
         history_val_loss.append(avg_val_loss)
 
+        if train_config.wandb_params.use_wandb:
+            wandb.log({
+                "epoch": epoch,
+                "train/epoch_loss": avg_train_loss,
+                "val/epoch_loss": avg_val_loss
+            })
+
         logger.info(f"Epoch {epoch} Validation Time: {val_time:.2f}s | Avg Val Loss: {avg_val_loss:.4f}")
 
         # --- SAVE CHECKPOINT ---
@@ -316,10 +316,10 @@ def main():
             'val_loss': avg_val_loss,
         }, ckpt_name)
         logger.info(f"Saved checkpoint: {ckpt_name}")
-        save_loss_plot(history_train_loss, history_val_loss, plot_path)
-        logger.info(f"Updated loss plot at: {plot_path}")
 
     logger.success("Training finished! 🎉🚀")
+    if train_config.wandb_params.use_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":

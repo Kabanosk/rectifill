@@ -15,4 +15,5 @@ dependencies = [
 	"loguru>=0.7.3",
 	"ruff>=0.15.1",
 	"matplotlib>=3.10.8",
+	"wandb>=0.25.1",
 ]

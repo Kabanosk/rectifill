@@ -48,9 +48,15 @@ class ModelConfig:
     max_seq_len: int = 4000
 
 
+class WandbConfig:
+    """ Configuration for the wandb project. """
+    use_wandb: bool = True
+    project_name: str = "rectifill"
+
+
 @dataclasses.dataclass
 class TrainConfig:
-    """Configuration for the training process."""
+    """Configuration for the training process. """
     model_name: str = "rfm_dit"
     device: str = "cuda"
     checkpoint_path: str = "checkpoints/run_05_fix_mask"
@@ -68,3 +74,4 @@ class TrainConfig:
     accumulation_steps: int = 4  # for gradient accumulation
 
     model_params: ModelConfig = dataclasses.field(default_factory=ModelConfig)
+    wandb_params: WandbConfig = dataclasses.field(default_factory=WandbConfig)
