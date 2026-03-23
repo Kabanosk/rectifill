@@ -49,9 +49,9 @@ class LibriSpeechCollator:
             padded_inp_mask = F.pad(inp_mask, (0, pad_amount), value=False)
             padded_inpainting_masks.append(padded_inp_mask)
 
-            # Create Attention Padding Mask (True for real data, False for padding)
+            # Create Attention Padding Mask (False for real data, True for padding)
             att_mask = torch.zeros(time_frames, dtype=torch.bool)
-            padded_att_mask = F.pad(att_mask, (0, pad_amount), value=False)
+            padded_att_mask = F.pad(att_mask, (0, pad_amount), value=True)
             pad_attention_masks.append(padded_att_mask)
 
         # Stack lists into actual batch tensors

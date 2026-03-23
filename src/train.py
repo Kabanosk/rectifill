@@ -218,7 +218,6 @@ def main():
         train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch}", leave=True)
         for batch_idx, batch in enumerate(train_pbar):
             mel = batch['mel'].squeeze(1).to(train_config.device)
-            mel_pad_mask = batch['mel_padding_mask'].to(train_config.device)
             mask_bool = batch['inpainting_mask'].to(train_config.device)
             mask_float = mask_bool.to(torch.float32)
 
@@ -280,12 +279,20 @@ def main():
 
                 text_emb = batch['embedding'].to(train_config.device)
                 text_mask = batch['text_padding_mask'].to(train_config.device)
+                mel_pad_mask = batch['mel_padding_mask'].to(train_config.device)
 
                 # --- RFM PREPARATION ---
                 xt, target_v, t = prepare_rfm_batch(mel, mask_bool, train_config.device)
 
                 # --- FORWARD PASS & LOSS ---
-                v_pred = model(xt=xt, mask=mask_float, t=t, text_emb=text_emb, text_mask=text_mask)
+                v_pred = model(
+                    xt=xt,
+                    mask=mask_float,
+                    t=t,
+                    text_emb=text_emb,
+                    text_mask=text_mask,
+                    mel_pad_mask=mel_pad_mask
+                )
 
                 loss = F.mse_loss(v_pred, target_v, reduction='none')
                 masked_loss = loss[mask_bool.expand_as(loss)].mean()

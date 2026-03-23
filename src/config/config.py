@@ -53,7 +53,7 @@ class TrainConfig:
     """Configuration for the training process."""
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/run_03_gradient_accumulation2"
+    checkpoint_path: str = "checkpoints/run_05_fix_mask"
     log_interval: int = 100
     epochs: int = 100
     seed: int = 42
@@ -61,7 +61,7 @@ class TrainConfig:
     learning_rate: float = 3e-4
     # for lr scheduler
     eta_min: float = 1e-6
-    warmup_steps: int = 10
+    warmup_steps: int = 2000
 
     weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0
