@@ -1,12 +1,12 @@
 import argparse
 import dataclasses
+import math
 import random
 import time
 from pathlib import Path
 
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -173,7 +173,7 @@ def main():
 
     scheduler = None
     if optimizer:
-        total_steps = (len(train_loader) // train_config.accumulation_steps) * train_config.epochs
+        total_steps = math.ceil(len(train_loader) / train_config.accumulation_steps) * train_config.epochs
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=train_config.warmup_steps)
         cosine_scheduler = CosineAnnealingLR(optimizer, T_max=(total_steps - train_config.warmup_steps), eta_min=1e-6)
         scheduler = SequentialLR(
@@ -224,7 +224,16 @@ def main():
             )
             loss = F.mse_loss(v_pred, target_v, reduction='none')
             masked_loss = loss[mask_bool.expand_as(loss)].mean()
-            normalized_loss = masked_loss / train_config.accumulation_steps
+
+            is_accumulated = (batch_idx + 1) % train_config.accumulation_steps == 0
+            is_last_batch = (batch_idx + 1) == len(train_loader)
+
+            if is_last_batch and not is_accumulated:
+                effective_accum_steps = len(train_loader) % train_config.accumulation_steps
+            else:
+                effective_accum_steps = train_config.accumulation_steps
+
+            normalized_loss = masked_loss / effective_accum_steps
 
             # --- BACKPROPAGATION ---
             if optimizer:

@@ -52,6 +52,8 @@ class ModulatedLayerNorm(nn.Module):
             nn.SiLU(),
             nn.Linear(condition_dim, 2 * hidden_size)
         )
+        nn.init.zeros_(self.mlp[1].weight)
+        nn.init.zeros_(self.mlp[1].bias)
 
     def forward(self, x: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
         """
@@ -158,6 +160,7 @@ class DiTModel(BaseModel):
         self.input_proj = nn.Conv1d(in_channels=in_channels, out_channels=config.hidden_size, kernel_size=1)
 
         self.pos_embed = nn.Parameter(torch.zeros(1, config.max_seq_len, config.hidden_size))
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         self.input_dropout = nn.Dropout(config.dropout)
 
@@ -188,7 +191,7 @@ class DiTModel(BaseModel):
             - text_mask: Optional boolean mask for text embeddings of shape [Batch, Text_Seq_Len].
         :return: Predicted velocity field of shape [Batch, Mel_Bins, Time].
         """
-        t = kwargs.get("t", 0)
+        t = kwargs["t"]
         text_emb = kwargs.get("text_emb", None)
         text_mask = kwargs.get("text_mask", None)
         mel_pad_mask = kwargs.get("mel_pad_mask", None)
