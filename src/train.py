@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from loguru import logger
 from tqdm import tqdm
 
@@ -183,8 +184,17 @@ def main():
         lr=train_config.learning_rate,
         weight_decay=train_config.weight_decay
     )
-
     logger.info(f"Loaded model [{train_config.model_name}] and moved to {train_config.device}")
+
+    total_optimization_steps = (len(train_loader) // train_config.accumulation_steps) * train_config.epochs
+    scheduler = None
+    if optimizer:
+        scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=total_optimization_steps,
+            eta_min=train_config.eta_min  # The minimum learning rate at the end of training
+        )
+        logger.info("Using CosineAnnealingLR scheduler")
 
     # ==========================================
     # MAIN TRAINING LOOP
@@ -200,6 +210,9 @@ def main():
         train_start_time = time.time()
         train_loss_accumulated = 0.0
 
+        if optimizer:
+            optimizer.zero_grad()
+
         train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch}", leave=True)
         for batch_idx, batch in enumerate(train_pbar):
             mel = batch['mel'].squeeze(1).to(train_config.device)
@@ -213,26 +226,27 @@ def main():
             xt, target_v, t = prepare_rfm_batch(mel, mask_bool, train_config.device)
 
             # --- FORWARD PASS & LOSS ---
-            if optimizer is not None:
-                optimizer.zero_grad()
-
             v_pred = model(xt=xt, mask=mask_float, t=t, text_emb=text_emb, text_mask=text_mask)
-
             loss = F.mse_loss(v_pred, target_v, reduction='none')
             masked_loss = loss[mask_bool.expand_as(loss)].mean()
+            normalized_loss = masked_loss / train_config.accumulation_steps
 
             # --- BACKPROPAGATION ---
-            if optimizer is not None:
-                masked_loss.backward()
+            if optimizer:
+                normalized_loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(),
-                    max_norm=train_config.gradient_clip_val
-                )
-                optimizer.step()
+                is_accumulated = (batch_idx + 1) % train_config.accumulation_steps == 0
+                is_last_batch = (batch_idx + 1) == len(train_loader)
+
+                if is_accumulated or is_last_batch:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=train_config.gradient_clip_val)
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
 
             train_loss_accumulated += masked_loss.item()
-            train_pbar.set_postfix({"loss": f"{masked_loss.item():.4f}"})
+            current_lr = scheduler.get_last_lr()[0] if scheduler else train_config.learning_rate
+            train_pbar.set_postfix({"loss": f"{masked_loss.item():.4f}", "lr": f"{current_lr:.2e}"})
 
         train_time = time.time() - train_start_time
         avg_train_loss = train_loss_accumulated / len(train_loader)
@@ -247,6 +261,7 @@ def main():
 
         val_pbar = tqdm(val_loader, desc=f"Validating Epoch {epoch}", leave=True)
         with torch.no_grad():
+            torch.manual_seed(train_config.seed)
             for batch_idx, batch in enumerate(val_pbar):
                 mel = batch['mel'].squeeze(1).to(train_config.device)
                 mask_bool = batch['inpainting_mask'].to(train_config.device)
