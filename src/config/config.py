@@ -21,7 +21,7 @@ class TextConfig:
 class DataConfig:
     """Main data configuration for the dataset and dataloaders."""
     data_path: str | pathlib.Path = "data"
-    batch_size: int = 16
+    batch_size: int = 8
     num_workers: int = 4
     shuffle: bool = True
     drop_last: bool = False
@@ -37,10 +37,10 @@ class DataConfig:
 @dataclasses.dataclass
 class ModelConfig:
     # Architecture dimensions
-    hidden_size: int = 256
-    depth: int = 6
-    num_heads: int = 8
-    dropout: float = 0.1
+    hidden_size: int = 384
+    depth: int = 8
+    num_heads: int = 12
+    dropout: float = 0.2
 
     # Audio & Text
     mel_bins: int = 128
@@ -53,9 +53,10 @@ class TrainConfig:
     """Configuration for the training process."""
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/run_01_full_rfm"
+    checkpoint_path: str = "checkpoints/run_02_scaled_model"
     log_interval: int = 100
     epochs: int = 100
+    seed: int = 42
 
     learning_rate: float = 3e-4
     weight_decay: float = 1e-2

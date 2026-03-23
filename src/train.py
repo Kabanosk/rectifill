@@ -1,10 +1,12 @@
 import argparse
+import random
 import time
 from pathlib import Path
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn.functional as F
 from loguru import logger
@@ -74,6 +76,21 @@ def prepare_rfm_batch(
     return xt, target_v, t
 
 
+def set_seed(seed: int = 42):
+    """
+    Ensures experiment reproducibility by setting the seed
+    across all used libraries (Python, NumPy, PyTorch).
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    logger.info(f"Global seed set to: {seed}")
+
+
 def parse_args() -> argparse.Namespace:
     """
     Parses command-line arguments, pulling defaults from config classes.
@@ -113,6 +130,8 @@ def parse_args() -> argparse.Namespace:
                         help="Weight decay for optimizer (L2 regularization).")
     parser.add_argument("--gradient_clip_val", type=float, default=default_train.gradient_clip_val,
                         help="Max norm for gradient clipping.")
+    parser.add_argument("--seed", type=int, default=default_train.seed,
+                        help="Random seed for reproducibility.")
 
     return parser.parse_args()
 
@@ -120,6 +139,18 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     logger.info("Initializing configurations and DataLoaders...")
+
+    train_config = TrainConfig(
+        model_name=args.model_name,
+        epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        gradient_clip_val=args.gradient_clip_val,
+        device=args.device,
+        checkpoint_path=args.checkpoint_path,
+        log_interval=args.log_interval
+    )
+    set_seed(train_config.seed)
 
     checkpoint_dir = Path(args.checkpoint_path)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -146,17 +177,6 @@ def main():
 
     logger.info(f"Train batches per epoch: {len(train_loader)}")
     logger.info(f"Val batches per epoch: {len(val_loader)}")
-
-    train_config = TrainConfig(
-        model_name=args.model_name,
-        epochs=args.epochs,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        gradient_clip_val=args.gradient_clip_val,
-        device=args.device,
-        checkpoint_path=args.checkpoint_path,
-        log_interval=args.log_interval
-    )
 
     model = get_model(train_config.model_name, train_config.model_params).to(train_config.device)
     optimizer = model.configure_optimizers(
