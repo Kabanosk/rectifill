@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from loguru import logger
 from tqdm import tqdm
 
@@ -169,7 +169,7 @@ def main():
     val_data_config = DataConfig(
         data_path=args.val_data,
         batch_size=args.batch_size,
-        num_workers=args.num_workers,
+        num_workers=0,
         max_mel_length=args.max_mel_length,
         shuffle=False,
         drop_last=False
@@ -186,15 +186,17 @@ def main():
     )
     logger.info(f"Loaded model [{train_config.model_name}] and moved to {train_config.device}")
 
-    total_optimization_steps = (len(train_loader) // train_config.accumulation_steps) * train_config.epochs
     scheduler = None
     if optimizer:
-        scheduler = CosineAnnealingLR(
+        total_steps = (len(train_loader) // train_config.accumulation_steps) * train_config.epochs
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=train_config.warmup_steps)
+        cosine_scheduler = CosineAnnealingLR(optimizer, T_max=(total_steps - train_config.warmup_steps), eta_min=1e-6)
+        scheduler = SequentialLR(
             optimizer,
-            T_max=total_optimization_steps,
-            eta_min=train_config.eta_min  # The minimum learning rate at the end of training
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[train_config.warmup_steps]
         )
-        logger.info("Using CosineAnnealingLR scheduler")
+        logger.info("Using CosineAnnealingLR scheduler with linear warmup")
 
     # ==========================================
     # MAIN TRAINING LOOP

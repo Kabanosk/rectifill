@@ -59,7 +59,9 @@ class TrainConfig:
     seed: int = 42
 
     learning_rate: float = 3e-4
-    eta_min: float = 1e-6  # for lr scheduler
+    # for lr scheduler
+    eta_min: float = 1e-6
+    warmup_steps: int = 10
 
     weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0
