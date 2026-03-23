@@ -50,7 +50,7 @@ class LibriSpeechCollator:
             padded_inpainting_masks.append(padded_inp_mask)
 
             # Create Attention Padding Mask (True for real data, False for padding)
-            att_mask = torch.ones(time_frames, dtype=torch.bool)
+            att_mask = torch.zeros(time_frames, dtype=torch.bool)
             padded_att_mask = F.pad(att_mask, (0, pad_amount), value=False)
             pad_attention_masks.append(padded_att_mask)
 

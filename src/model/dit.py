@@ -103,7 +103,7 @@ class DiTBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor, text_emb: torch.Tensor,
-                text_mask: torch.Tensor = None) -> torch.Tensor:
+                text_mask: torch.Tensor = None, mel_pad_mask: torch.Tensor = None) -> torch.Tensor:
         """
         Processes the input through self-attention, cross-attention, and FFN.
 
@@ -111,11 +111,13 @@ class DiTBlock(nn.Module):
         :param cond: Timestep condition tensor of shape [Batch, Cond_Dim].
         :param text_emb: Text embeddings tensor of shape [Batch, Text_Seq_Len, Text_Dim].
         :param text_mask: Optional boolean mask for text embeddings.
+        :param mel_pad_mask: Optional boolean mask for mel-spectrogram padding.
+
         :return: Processed tensor of shape [Batch, Seq_Len, Hidden_Size].
         """
         # --- Self Attention ---
         h = self.norm1(x, cond)
-        attn_out, _ = self.attn(query=h, key=h, value=h)
+        attn_out, _ = self.attn(query=h, key=h, value=h, key_padding_mask=mel_pad_mask)
         x = x + attn_out
 
         # --- Cross Attention ---
@@ -189,6 +191,7 @@ class DiTModel(BaseModel):
         t = kwargs.get("t", 0)
         text_emb = kwargs.get("text_emb", None)
         text_mask = kwargs.get("text_mask", None)
+        mel_pad_mask = kwargs.get("mel_pad_mask", None)
 
         # --- Timestep Embedding ---
         t_emb = self.time_mlp(t)  # [Batch, Hidden_Size]
@@ -207,7 +210,7 @@ class DiTModel(BaseModel):
 
         # --- Process through DiT Blocks ---
         for block in self.blocks:
-            x = block(x, cond=t_emb, text_emb=text_emb, text_mask=text_mask)
+            x = block(x, cond=t_emb, text_emb=text_emb, text_mask=text_mask, mel_pad_mask=mel_pad_mask)
 
         # --- Output Projection ---
         x = x.transpose(1, 2)  # [Batch, Hidden_Size, Time]
