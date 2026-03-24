@@ -78,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     default_data = DataConfig()
 
     # --- Data Paths Arguments ---
-    parser.add_argument("--train_data", type=str, default="data/processed/train-clean-100",
+    parser.add_argument("--train_data", type=str, default="data/processed/train-clean-360",
                         help="Path to the training dataset directory.")
     parser.add_argument("--val_data", type=str, default="data/processed/dev-clean",
                         help="Path to the validation dataset directory.")
@@ -172,6 +172,7 @@ def main():
     logger.info(f"Loaded model [{train_config.model_name}] and moved to {train_config.device}")
 
     scheduler = None
+    global_optim_step = 0
     if optimizer:
         total_steps = math.ceil(len(train_loader) / train_config.accumulation_steps) * train_config.epochs
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=train_config.warmup_steps)
@@ -247,18 +248,17 @@ def main():
                     optimizer.step()
                     scheduler.step()
                     optimizer.zero_grad()
+                    global_optim_step += 1
 
             train_loss_accumulated += masked_loss.item()
             current_lr = scheduler.get_last_lr()[0] if scheduler else train_config.learning_rate
             train_pbar.set_postfix({"loss": f"{masked_loss.item():.4f}", "lr": f"{current_lr:.2e}"})
 
             if train_config.wandb_params.use_wandb and batch_idx % train_config.log_interval == 0:
-                global_step = (epoch - 1) * len(train_loader) + batch_idx
-                wandb.log({
-                    "train/batch_loss": masked_loss.item(),
-                    "train/learning_rate": current_lr,
-                    "global_step": global_step
-                })
+                wandb.log(
+                    {"train/batch_loss": masked_loss.item(), "train/learning_rate": current_lr},
+                    step=global_optim_step
+                )
 
         train_time = time.time() - train_start_time
         avg_train_loss = train_loss_accumulated / len(train_loader)

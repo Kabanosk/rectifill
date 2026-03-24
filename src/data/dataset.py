@@ -41,8 +41,8 @@ class LibriSpeechCollator:
             time_frames = mel.shape[-1]
             pad_amount = max_mel_len - time_frames
 
-            # Pad Mel with zeros
-            padded_mel = F.pad(mel, (0, pad_amount), value=0.0)
+            # Pad Mel
+            padded_mel = F.pad(mel, (0, pad_amount), value=-100.0)
             padded_mels.append(padded_mel)
 
             # Pad Inpainting Mask with False (padding is NOT a hole to inpaint)
