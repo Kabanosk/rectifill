@@ -172,7 +172,7 @@ def main():
     logger.info(f"Loaded model [{train_config.model_name}] and moved to {train_config.device}")
 
     scheduler = None
-    global_optim_step = 0
+    global_step = 0
     if optimizer:
         total_steps = math.ceil(len(train_loader) / train_config.accumulation_steps) * train_config.epochs
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=train_config.warmup_steps)
@@ -248,7 +248,7 @@ def main():
                     optimizer.step()
                     scheduler.step()
                     optimizer.zero_grad()
-                    global_optim_step += 1
+                    global_step += 1
 
             train_loss_accumulated += masked_loss.item()
             current_lr = scheduler.get_last_lr()[0] if scheduler else train_config.learning_rate
@@ -257,7 +257,7 @@ def main():
             if train_config.wandb_params.use_wandb and batch_idx % train_config.log_interval == 0:
                 wandb.log(
                     {"train/batch_loss": masked_loss.item(), "train/learning_rate": current_lr},
-                    step=global_optim_step
+                    step=global_step
                 )
 
         train_time = time.time() - train_start_time
@@ -307,24 +307,25 @@ def main():
         history_val_loss.append(avg_val_loss)
 
         if train_config.wandb_params.use_wandb:
-            wandb.log({
-                "epoch": epoch,
-                "train/epoch_loss": avg_train_loss,
-                "val/epoch_loss": avg_val_loss
-            })
+            global_step += 1
+            wandb.log(
+                {"epoch": epoch, "train/epoch_loss": avg_train_loss, "val/epoch_loss": avg_val_loss},
+                step=global_step
+            )
 
         logger.info(f"Epoch {epoch} Validation Time: {val_time:.2f}s | Avg Val Loss: {avg_val_loss:.4f}")
 
         # --- SAVE CHECKPOINT ---
-        ckpt_name = checkpoint_dir / f"{train_config.model_name}_epoch_{epoch}.pt"
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
-            'train_loss': avg_train_loss,
-            'val_loss': avg_val_loss,
-        }, ckpt_name)
-        logger.info(f"Saved checkpoint: {ckpt_name}")
+        if epoch % 5 == 0:
+            ckpt_name = checkpoint_dir / f"{train_config.model_name}_epoch_{epoch}.pt"
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
+                'train_loss': avg_train_loss,
+                'val_loss': avg_val_loss,
+            }, ckpt_name)
+            logger.info(f"Saved checkpoint: {ckpt_name}")
 
     logger.success("Training finished! 🎉🚀")
     if train_config.wandb_params.use_wandb:
