@@ -35,12 +35,19 @@ class DataConfig:
 
 
 @dataclasses.dataclass
+class WandbConfig:
+    """ Configuration for the wandb project. """
+    use_wandb: bool = True
+    project_name: str = "rectifill"
+
+
+@dataclasses.dataclass
 class ModelConfig:
     # Architecture dimensions
-    hidden_size: int = 256
-    depth: int = 6
-    num_heads: int = 8
-    dropout: float = 0.1
+    hidden_size: int = 384
+    depth: int = 8
+    num_heads: int = 12
+    dropout: float = 0.2
 
     # Audio & Text
     mel_bins: int = 128
@@ -49,18 +56,11 @@ class ModelConfig:
 
 
 @dataclasses.dataclass
-class WandbConfig:
-    """ Configuration for the wandb project. """
-    use_wandb: bool = True
-    project_name: str = "rectifill"
-
-
-@dataclasses.dataclass
 class TrainConfig:
     """Configuration for the training process. """
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/run_06_360h"
+    checkpoint_path: str = "checkpoints/run_08_bigger_model"
     log_interval: int = 100
     epochs: int = 50
     seed: int = 42

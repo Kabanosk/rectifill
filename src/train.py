@@ -17,56 +17,10 @@ from tqdm import tqdm
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.dataset import get_dataloader
+from src.evaluation.metrics import calculate_lsd
 from src.model import get_model
-
-
-def prepare_rfm_batch(
-    x1: torch.Tensor, mask_bool: torch.Tensor, device: str | torch.device
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Samples time t, generates noise x0, and computes the intermediate state xt
-    and target velocity for Rectified Flow Matching.
-
-    :param x1: Target clean mel-spectrogram of shape [Batch, Mel_Bins, Time]
-    :param mask_bool: Boolean inpainting mask of shape [Batch, 1, Time]
-    :param device: Computing device
-    :return: Tuple containing (xt, target_velocity, t)
-    """
-    batch_size = x1.shape[0]
-
-    # 1. Sample timestep t from U(0, 1)
-    t = torch.rand((batch_size,), device=device)
-    t_expanded = t.view(-1, 1, 1)  # [B, 1, 1] for broadcasting
-
-    # 2. Sample Noise x0 from N(0, I)
-    x0 = torch.randn_like(x1)
-
-    # 3. Calculate intermediate state xt (Linear interpolation)
-    xt_hole = t_expanded * x1 + (1.0 - t_expanded) * x0
-
-    # 4. Inpainting condition: Keep original x1 where mask is False (context)
-    # Only apply noise to the masked regions.
-    xt = torch.where(mask_bool.expand_as(x1), xt_hole, x1)
-
-    # 5. Calculate target velocity v
-    target_v = x1 - x0
-
-    return xt, target_v, t
-
-
-def set_seed(seed: int = 42):
-    """
-    Ensures experiment reproducibility by setting the seed
-    across all used libraries (Python, NumPy, PyTorch).
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    logger.info(f"Global seed set to: {seed}")
+from src.utils.helpers import set_seed
+from src.utils.rfm import prepare_rfm_batch, sample_euler
 
 
 def parse_args() -> argparse.Namespace:
@@ -172,7 +126,8 @@ def main():
     logger.info(f"Loaded model [{train_config.model_name}] and moved to {train_config.device}")
 
     scheduler = None
-    global_step = 0
+    global_step = 0  # for wandb
+    best_val_lsd = float('inf')
     if optimizer:
         total_steps = math.ceil(len(train_loader) / train_config.accumulation_steps) * train_config.epochs
         warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=train_config.warmup_steps)
@@ -270,6 +225,8 @@ def main():
         model.eval()
         val_start_time = time.time()
         val_loss_accumulated = 0.0
+        val_lsd_accumulated = 0.0
+        num_lsd_batches = 0
 
         val_pbar = tqdm(val_loader, desc=f"Validating Epoch {epoch}", leave=True)
         with torch.no_grad():
@@ -285,37 +242,51 @@ def main():
 
                 # --- RFM PREPARATION ---
                 xt, target_v, t = prepare_rfm_batch(mel, mask_bool, train_config.device)
-
-                # --- FORWARD PASS & LOSS ---
-                v_pred = model(
-                    xt=xt,
-                    mask=mask_float,
-                    t=t,
-                    text_emb=text_emb,
-                    text_mask=text_mask,
-                    mel_pad_mask=mel_pad_mask
-                )
-
+                v_pred = model(xt=xt, mask=mask_float, t=t, text_emb=text_emb, text_mask=text_mask,
+                               mel_pad_mask=mel_pad_mask)
                 loss = F.mse_loss(v_pred, target_v, reduction='none')
                 masked_loss = loss[mask_bool.expand_as(loss)].mean()
 
                 val_loss_accumulated += masked_loss.item()
+
+                # --- ODE Sampling & LSD Calculation ---
+                # Generate audio and calculate LSD
+                generated_mel = sample_euler(model=model, x1_context=mel, mask_bool=mask_bool, text_emb=text_emb,
+                                             text_mask=text_mask, mel_pad_mask=mel_pad_mask, num_steps=20)
+                batch_lsd = calculate_lsd(generated_mel, mel)
+                val_lsd_accumulated += batch_lsd
+                num_lsd_batches += 1
+
                 val_pbar.set_postfix({"val_loss": f"{masked_loss.item():.4f}"})
 
         val_time = time.time() - val_start_time
         avg_val_loss = val_loss_accumulated / len(val_loader) if len(val_loader) > 0 else 0
+        avg_val_lsd = val_lsd_accumulated / num_lsd_batches if num_lsd_batches > 0 else float('inf')
         history_val_loss.append(avg_val_loss)
 
         if train_config.wandb_params.use_wandb:
             global_step += 1
-            wandb.log(
-                {"epoch": epoch, "train/epoch_loss": avg_train_loss, "val/epoch_loss": avg_val_loss},
-                step=global_step
-            )
+            wandb.log({
+                "epoch": epoch,
+                "train/epoch_loss": avg_train_loss,
+                "val/epoch_loss": avg_val_loss,
+                "val/epoch_lsd": avg_val_lsd
+            }, step=global_step)
 
-        logger.info(f"Epoch {epoch} Validation Time: {val_time:.2f}s | Avg Val Loss: {avg_val_loss:.4f}")
+        logger.info(f"Epoch {epoch}| Val Time: {val_time:.2f}s | Val Loss: {avg_val_loss:.4f} | LSD: {avg_val_lsd:.4f}")
 
-        # --- SAVE CHECKPOINT ---
+        # --- SAVE CHECKPOINTS ---
+        if avg_val_lsd < best_val_lsd:
+            best_val_lsd = avg_val_lsd
+            best_ckpt_name = checkpoint_dir / f"{train_config.model_name}_best.pt"
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
+                'val_lsd': best_val_lsd,
+            }, best_ckpt_name)
+            logger.info(f"New best model saved! LSD dropped to {best_val_lsd:.4f}")
+
         if epoch % 5 == 0:
             ckpt_name = checkpoint_dir / f"{train_config.model_name}_epoch_{epoch}.pt"
             torch.save({
