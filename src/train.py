@@ -253,7 +253,7 @@ def main():
                 # Generate audio and calculate LSD
                 generated_mel = sample_euler(model=model, x1_context=mel, mask_bool=mask_bool, text_emb=text_emb,
                                              text_mask=text_mask, mel_pad_mask=mel_pad_mask, num_steps=20)
-                batch_lsd = calculate_lsd(generated_mel, mel)
+                batch_lsd = calculate_lsd(generated_mel, mel, mask_bool)
                 val_lsd_accumulated += batch_lsd
                 num_lsd_batches += 1
 

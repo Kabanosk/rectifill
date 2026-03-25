@@ -1,21 +1,24 @@
 import torch
 
 
-def calculate_lsd(pred_mel: torch.Tensor, target_mel: torch.Tensor) -> float:
+def calculate_lsd(pred_mel: torch.Tensor, target_mel: torch.Tensor, mask_bool: torch.Tensor) -> float:
     """
-    Calculates the Log-Spectral Distance (LSD) between two mel-spectrograms.
-    Lower is better.
+    Calculates the Log-Spectral Distance (LSD) between two mel-spectrograms
+    ONLY for the masked (inpainted) regions.
 
-    :param pred_mel: Predicted mel-spectrogram.
-    :param target_mel: Target mel-spectrogram.
-    :return: Log-Spectral Distance between them.
+    Inputs are assumed to be already in decibels (dB).
+
+    :param pred_mel: Predicted mel-spectrogram in dB [Batch, Mel_Bins, Time].
+    :param target_mel: Target mel-spectrogram in dB [Batch, Mel_Bins, Time].
+    :param mask_bool: Boolean mask where True indicates the generated hole [Batch, 1, Time].
+    :return: Mean LSD for the masked frames in dB.
     """
-    eps = 1e-10
+    diff_squared = (target_mel - pred_mel) ** 2
+    lsd_per_frame = torch.sqrt(torch.mean(diff_squared, dim=1, keepdim=True))
 
-    log_pred = torch.log10(torch.clamp(pred_mel, min=eps))
-    log_target = torch.log10(torch.clamp(target_mel, min=eps))
+    masked_lsd = lsd_per_frame[mask_bool]
 
-    diff_squared = (log_target - log_pred) ** 2
-    lsd_per_frame = torch.sqrt(torch.mean(diff_squared, dim=1))
+    if masked_lsd.numel() == 0:
+        return 0.0
 
-    return lsd_per_frame.mean().item()
+    return masked_lsd.mean().item()
