@@ -1,22 +1,19 @@
 import argparse
 import dataclasses
 import math
-import random
 import time
 from pathlib import Path
 
-import matplotlib
-matplotlib.use('Agg')
-import numpy as np
 import torch
 import torch.nn.functional as F
-import wandb
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from loguru import logger
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
+import wandb
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.dataset import get_dataloader
+from src.data.utils import denormalize_mel, normalize_mel
 from src.evaluation.metrics import calculate_lsd
 from src.model import get_model
 from src.utils.helpers import set_seed
@@ -143,9 +140,6 @@ def main():
     # MAIN TRAINING LOOP
     # ==========================================
     logger.info("Starting training loop")
-    history_train_loss = []
-    history_val_loss = []
-    plot_path = checkpoint_dir / "loss_curve.png"
 
     for epoch in range(1, train_config.epochs + 1):
         # --- TRAIN PHASE ---
@@ -158,7 +152,9 @@ def main():
 
         train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch}", leave=True)
         for batch_idx, batch in enumerate(train_pbar):
-            mel = batch['mel'].squeeze(1).to(train_config.device)
+            mel_raw = batch['mel'].squeeze(1).to(train_config.device)
+            mel = normalize_mel(mel_raw)
+
             mask_bool = batch['inpainting_mask'].to(train_config.device)
             mask_float = mask_bool.to(torch.float32)
 
@@ -195,9 +191,6 @@ def main():
             if optimizer:
                 normalized_loss.backward()
 
-                is_accumulated = (batch_idx + 1) % train_config.accumulation_steps == 0
-                is_last_batch = (batch_idx + 1) == len(train_loader)
-
                 if is_accumulated or is_last_batch:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=train_config.gradient_clip_val)
                     optimizer.step()
@@ -217,7 +210,6 @@ def main():
 
         train_time = time.time() - train_start_time
         avg_train_loss = train_loss_accumulated / len(train_loader)
-        history_train_loss.append(avg_train_loss)
 
         logger.info(f"Epoch {epoch} Training Time: {train_time:.2f}s | Avg Train Loss: {avg_train_loss:.4f}")
 
@@ -232,7 +224,9 @@ def main():
         with torch.no_grad():
             torch.manual_seed(train_config.seed)
             for batch_idx, batch in enumerate(val_pbar):
-                mel = batch['mel'].squeeze(1).to(train_config.device)
+                mel_raw = batch['mel'].squeeze(1).to(train_config.device)
+                mel = normalize_mel(mel_raw)
+
                 mask_bool = batch['inpainting_mask'].to(train_config.device)
                 mask_float = mask_bool.to(torch.float32)
 
@@ -249,20 +243,24 @@ def main():
 
                 val_loss_accumulated += masked_loss.item()
 
-                # --- ODE Sampling & LSD Calculation ---
-                # Generate audio and calculate LSD
-                generated_mel = sample_euler(model=model, x1_context=mel, mask_bool=mask_bool, text_emb=text_emb,
-                                             text_mask=text_mask, mel_pad_mask=mel_pad_mask, num_steps=20)
-                batch_lsd = calculate_lsd(generated_mel, mel, mask_bool)
-                val_lsd_accumulated += batch_lsd
-                num_lsd_batches += 1
+                # --- ODE Sampling ---
+                if batch_idx < train_config.validation_metrics_steps:
+                    generated_mel_norm = sample_euler(model=model, x1_context=mel, mask_bool=mask_bool, text_emb=text_emb,
+                                                      text_mask=text_mask, mel_pad_mask=mel_pad_mask, num_steps=50)
+
+                    # --- Denormalization for metrics ---
+                    generated_mel = denormalize_mel(generated_mel_norm)
+
+                    # --- LSD Calculation ---
+                    batch_lsd = calculate_lsd(generated_mel, mel_raw, mask_bool)
+                    val_lsd_accumulated += batch_lsd
+                    num_lsd_batches += 1
 
                 val_pbar.set_postfix({"val_loss": f"{masked_loss.item():.4f}"})
 
         val_time = time.time() - val_start_time
         avg_val_loss = val_loss_accumulated / len(val_loader) if len(val_loader) > 0 else 0
         avg_val_lsd = val_lsd_accumulated / num_lsd_batches if num_lsd_batches > 0 else float('inf')
-        history_val_loss.append(avg_val_loss)
 
         if train_config.wandb_params.use_wandb:
             global_step += 1

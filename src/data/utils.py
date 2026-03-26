@@ -1,3 +1,5 @@
+import librosa
+import numpy as np
 import torch
 import torchaudio
 import torchaudio.transforms as T
@@ -46,6 +48,50 @@ def get_mel_transform(sample_rate=16000, n_mels=128) -> torch.nn.Sequential:
     amplitude_to_db = T.AmplitudeToDB()
 
     return torch.nn.Sequential(mel_spectrogram, amplitude_to_db)
+
+
+def mel_to_waveform(mel: np.ndarray, sr: int = 16000, n_fft: int = 1024, hop_length: int = 512) -> np.ndarray:
+    """
+    Converts a log-mel spectrogram back to audio using the Griffin-Lim algorithm.
+
+    :param mel: Log-mel spectrogram to convert.
+    :param sr: Expected sample rate of the audio (default: 16000).
+    :param n_fft: Number of FFT bins (default: 1024).
+    :param hop_length: Hop length (default: 512).
+    :return: A numpy array representing the audio waveform.
+    """
+    mel_power = 10.0 ** (mel / 10.0)
+    wav = librosa.feature.inverse.mel_to_audio(
+        M=mel_power, sr=sr, n_fft=n_fft, hop_length=hop_length
+    )
+    return wav
+
+
+def normalize_mel(mel: torch.Tensor, min_db: float = -120.0, max_db: float = 20.0) -> torch.Tensor:
+    """
+    Scales Mel-spectrogram values from the [min_db, max_db] range to [-1, 1].
+    Ideal for diffusion models and Flow Matching.
+
+    :param mel: Mel-spectrogram tensor in decibels (dB).
+    :param min_db: Minimum expected dB value (default: -120.0).
+    :param max_db: Maximum expected dB value (default: 20.0).
+    :return: Normalized Mel-spectrogram tensor in the range [-1, 1].
+    """
+    mel = torch.clamp(mel, min=min_db, max=max_db)
+    return ((mel - min_db) / (max_db - min_db)) * 2.0 - 1.0
+
+
+def denormalize_mel(mel_norm: torch.Tensor, min_db: float = -120.0, max_db: float = 20.0) -> torch.Tensor:
+    """
+    Reverts the [-1, 1] scaling back to the original decibel (dB) scale.
+
+    :param mel_norm: Normalized Mel-spectrogram tensor in the range [-1, 1].
+    :param min_db: Minimum expected dB value (default: -120.0).
+    :param max_db: Maximum expected dB value (default: 20.0).
+    :return: Denormalized Mel-spectrogram tensor in decibels (dB).
+    """
+    mel_01 = (mel_norm + 1.0) / 2.0
+    return mel_01 * (max_db - min_db) + min_db
 
 
 class RandomInpaintingMasker:
