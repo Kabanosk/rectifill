@@ -162,6 +162,11 @@ def main():
             text_mask = batch['text_padding_mask'].to(train_config.device)
             mel_pad_mask = batch['mel_padding_mask'].to(train_config.device)
 
+            # --- CFG DROPOUT ---
+            if train_config.cfg_prob > 0.0:
+                drop_mask = torch.rand(text_emb.shape[0], 1, 1, device=train_config.device) < train_config.cfg_prob
+                text_emb = torch.where(drop_mask, torch.zeros_like(text_emb), text_emb)
+
             # --- RFM PREPARATION ---
             xt, target_v, t = prepare_rfm_batch(mel, mask_bool, train_config.device)
 
@@ -245,8 +250,10 @@ def main():
 
                 # --- ODE Sampling ---
                 if batch_idx < train_config.validation_metrics_steps:
-                    generated_mel_norm = sample_euler(model=model, x1_context=mel, mask_bool=mask_bool, text_emb=text_emb,
-                                                      text_mask=text_mask, mel_pad_mask=mel_pad_mask, num_steps=50)
+                    generated_mel_norm = sample_euler(
+                        model=model, x1_context=mel, mask_bool=mask_bool, text_emb=text_emb, text_mask=text_mask,
+                        mel_pad_mask=mel_pad_mask, num_steps=50, cfg_scale=train_config.cfg_scale
+                    )
 
                     # --- Denormalization for metrics ---
                     generated_mel = denormalize_mel(generated_mel_norm)

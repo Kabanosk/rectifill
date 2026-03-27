@@ -76,5 +76,9 @@ class TrainConfig:
 
     validation_metrics_steps: int = 5
 
+    # CFG Parameters
+    cfg_prob: float = 0.1  # Probability of dropping text condition during training
+    cfg_scale: float = 3.0  # Guidance scale for validation and inference
+
     model_params: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     wandb_params: WandbConfig = dataclasses.field(default_factory=WandbConfig)
