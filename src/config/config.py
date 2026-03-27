@@ -44,10 +44,10 @@ class WandbConfig:
 @dataclasses.dataclass
 class ModelConfig:
     # Architecture dimensions
-    hidden_size: int = 384
-    depth: int = 8
-    num_heads: int = 12
-    dropout: float = 0.2
+    hidden_size: int = 256
+    depth: int = 16
+    num_heads: int = 8
+    dropout: float = 0.3
 
     # Audio & Text
     mel_bins: int = 128
@@ -60,7 +60,7 @@ class TrainConfig:
     """Configuration for the training process. """
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/run_08_bigger_model"
+    checkpoint_path: str = "checkpoints/run_12"
     log_interval: int = 100
     epochs: int = 50
     seed: int = 42
@@ -68,11 +68,13 @@ class TrainConfig:
     learning_rate: float = 3e-4
     # for lr scheduler
     eta_min: float = 1e-6
-    warmup_steps: int = 3000
+    warmup_steps: int = 6000
 
-    weight_decay: float = 1e-2
+    weight_decay: float = 5e-2
     gradient_clip_val: float = 1.0
     accumulation_steps: int = 8  # for gradient accumulation
+
+    validation_metrics_steps: int = 5
 
     model_params: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     wandb_params: WandbConfig = dataclasses.field(default_factory=WandbConfig)
