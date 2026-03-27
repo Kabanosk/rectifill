@@ -45,7 +45,7 @@ def get_mel_transform(sample_rate=16000, n_mels=128) -> torch.nn.Sequential:
         n_mels=n_mels,
         normalized=True
     )
-    amplitude_to_db = T.AmplitudeToDB()
+    amplitude_to_db = T.AmplitudeToDB(stype="power", top_db=100.0)
 
     return torch.nn.Sequential(mel_spectrogram, amplitude_to_db)
 
@@ -67,13 +67,13 @@ def mel_to_waveform(mel: np.ndarray, sr: int = 16000, n_fft: int = 1024, hop_len
     return wav
 
 
-def normalize_mel(mel: torch.Tensor, min_db: float = -120.0, max_db: float = 20.0) -> torch.Tensor:
+def normalize_mel(mel: torch.Tensor, min_db: float = -100.0, max_db: float = 20.0) -> torch.Tensor:
     """
     Scales Mel-spectrogram values from the [min_db, max_db] range to [-1, 1].
     Ideal for diffusion models and Flow Matching.
 
     :param mel: Mel-spectrogram tensor in decibels (dB).
-    :param min_db: Minimum expected dB value (default: -120.0).
+    :param min_db: Minimum expected dB value (default: -100.0).
     :param max_db: Maximum expected dB value (default: 20.0).
     :return: Normalized Mel-spectrogram tensor in the range [-1, 1].
     """
@@ -81,12 +81,12 @@ def normalize_mel(mel: torch.Tensor, min_db: float = -120.0, max_db: float = 20.
     return ((mel - min_db) / (max_db - min_db)) * 2.0 - 1.0
 
 
-def denormalize_mel(mel_norm: torch.Tensor, min_db: float = -120.0, max_db: float = 20.0) -> torch.Tensor:
+def denormalize_mel(mel_norm: torch.Tensor, min_db: float = -100.0, max_db: float = 20.0) -> torch.Tensor:
     """
     Reverts the [-1, 1] scaling back to the original decibel (dB) scale.
 
     :param mel_norm: Normalized Mel-spectrogram tensor in the range [-1, 1].
-    :param min_db: Minimum expected dB value (default: -120.0).
+    :param min_db: Minimum expected dB value (default: -100.0).
     :param max_db: Maximum expected dB value (default: 20.0).
     :return: Denormalized Mel-spectrogram tensor in decibels (dB).
     """

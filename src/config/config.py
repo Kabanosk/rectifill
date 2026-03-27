@@ -45,9 +45,9 @@ class WandbConfig:
 class ModelConfig:
     # Architecture dimensions
     hidden_size: int = 256
-    depth: int = 16
+    depth: int = 12
     num_heads: int = 8
-    dropout: float = 0.3
+    dropout: float = 0.2
 
     # Audio & Text
     mel_bins: int = 128
@@ -60,7 +60,7 @@ class TrainConfig:
     """Configuration for the training process. """
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/run_12"
+    checkpoint_path: str = "checkpoints/run_13_cfg"
     log_interval: int = 100
     epochs: int = 50
     seed: int = 42
@@ -70,14 +70,14 @@ class TrainConfig:
     eta_min: float = 1e-6
     warmup_steps: int = 6000
 
-    weight_decay: float = 5e-2
+    weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0
     accumulation_steps: int = 8  # for gradient accumulation
 
     validation_metrics_steps: int = 5
 
     # CFG Parameters
-    cfg_prob: float = 0.1  # Probability of dropping text condition during training
+    cfg_prob: float = 0.1   # Probability of dropping text condition during training
     cfg_scale: float = 3.0  # Guidance scale for validation and inference
 
     model_params: ModelConfig = dataclasses.field(default_factory=ModelConfig)
