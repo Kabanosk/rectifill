@@ -16,6 +16,7 @@ from src.data.dataset import get_dataloader
 from src.data.utils import denormalize_mel, normalize_mel
 from src.evaluation.metrics import calculate_lsd
 from src.model import get_model
+from src.model.ema import ModelEMA
 from src.utils.helpers import set_seed
 from src.utils.rfm import prepare_rfm_batch, sample_euler
 
@@ -122,6 +123,14 @@ def main():
     )
     logger.info(f"Loaded model [{train_config.model_name}] and moved to {train_config.device}")
 
+    total_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Model Parameters: {total_params:,}")
+
+    ema = None
+    if train_config.use_ema:
+        ema = ModelEMA(model, decay=train_config.ema_decay)
+        logger.info(f"Initialized EMA with decay {train_config.ema_decay}")
+
     scheduler = None
     global_step = 0  # for wandb
     best_val_lsd = float('inf')
@@ -203,6 +212,10 @@ def main():
                     optimizer.zero_grad()
                     global_step += 1
 
+                    # --- EMA UPDATE ---
+                    if ema and global_step % train_config.ema_update_every == 0:
+                        ema.update(model)
+
             train_loss_accumulated += masked_loss.item()
             current_lr = scheduler.get_last_lr()[0] if scheduler else train_config.learning_rate
             train_pbar.set_postfix({"loss": f"{masked_loss.item():.4f}", "lr": f"{current_lr:.2e}"})
@@ -219,13 +232,21 @@ def main():
         logger.info(f"Epoch {epoch} Training Time: {train_time:.2f}s | Avg Train Loss: {avg_train_loss:.4f}")
 
         # --- VALIDATION PHASE ---
-        model.eval()
+        model_to_eval = ema.ema_model if ema is not None else model
+        model_to_eval.eval()
+
         val_start_time = time.time()
         val_loss_accumulated = 0.0
         val_lsd_accumulated = 0.0
         num_lsd_batches = 0
 
         val_pbar = tqdm(val_loader, desc=f"Validating Epoch {epoch}", leave=True)
+
+        rng_state = torch.get_rng_state()
+        cuda_rng_state = None
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.cuda.get_rng_state()
+
         with torch.no_grad():
             torch.manual_seed(train_config.seed)
             for batch_idx, batch in enumerate(val_pbar):
@@ -241,8 +262,14 @@ def main():
 
                 # --- RFM PREPARATION ---
                 xt, target_v, t = prepare_rfm_batch(mel, mask_bool, train_config.device)
-                v_pred = model(xt=xt, mask=mask_float, t=t, text_emb=text_emb, text_mask=text_mask,
-                               mel_pad_mask=mel_pad_mask)
+                v_pred = model_to_eval(
+                    xt=xt,
+                    mask=mask_float,
+                    t=t,
+                    text_emb=text_emb,
+                    text_mask=text_mask,
+                    mel_pad_mask=mel_pad_mask
+                )
                 loss = F.mse_loss(v_pred, target_v, reduction='none')
                 masked_loss = loss[mask_bool.expand_as(loss)].mean()
 
@@ -251,8 +278,14 @@ def main():
                 # --- ODE Sampling ---
                 if batch_idx < train_config.validation_metrics_steps:
                     generated_mel_norm = sample_euler(
-                        model=model, x1_context=mel, mask_bool=mask_bool, text_emb=text_emb, text_mask=text_mask,
-                        mel_pad_mask=mel_pad_mask, num_steps=50, cfg_scale=train_config.cfg_scale
+                        model=model_to_eval,
+                        x1_context=mel,
+                        mask_bool=mask_bool,
+                        text_emb=text_emb,
+                        text_mask=text_mask,
+                        mel_pad_mask=mel_pad_mask,
+                        num_steps=50,
+                        cfg_scale=train_config.cfg_scale
                     )
 
                     # --- Denormalization for metrics ---
@@ -268,6 +301,10 @@ def main():
         val_time = time.time() - val_start_time
         avg_val_loss = val_loss_accumulated / len(val_loader) if len(val_loader) > 0 else 0
         avg_val_lsd = val_lsd_accumulated / num_lsd_batches if num_lsd_batches > 0 else float('inf')
+
+        torch.set_rng_state(rng_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng_state)
 
         if train_config.wandb_params.use_wandb:
             global_step += 1
@@ -288,6 +325,8 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
+                'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+                'ema_model_state_dict': ema.ema_model.state_dict() if ema else None,
                 'val_lsd': best_val_lsd,
             }, best_ckpt_name)
             logger.info(f"New best model saved! LSD dropped to {best_val_lsd:.4f}")
@@ -298,6 +337,8 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict() if optimizer else None,
+                'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+                'ema_model_state_dict': ema.ema_model.state_dict() if ema else None,
                 'train_loss': avg_train_loss,
                 'val_loss': avg_val_loss,
             }, ckpt_name)
