@@ -60,7 +60,7 @@ class TrainConfig:
     """Configuration for the training process. """
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/run_13_cfg"
+    checkpoint_path: str = "checkpoints/run_14_ema"
     log_interval: int = 100
     epochs: int = 50
     seed: int = 42

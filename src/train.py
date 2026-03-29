@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=default_train.seed,
                         help="Random seed for reproducibility.")
 
+    parser.add_argument("--resume_from", type=str, default=None,
+                        help="Path to a specific .pt checkpoint file to resume training from.")
+    parser.add_argument("--wandb_id", type=str, default=None,
+                        help="Wandb run ID to resume (e.g., '1a2b3c4d').")
+
     return parser.parse_args()
 
 
@@ -110,7 +115,9 @@ def main():
         config = dataclasses.asdict(train_config) | dataclasses.asdict(train_data_config)
         wandb.init(
             project=train_config.wandb_params.project_name,
-            config=config
+            config=config,
+            id=args.wandb_id,
+            resume="allow"
         )
 
     logger.info(f"Train batches per epoch: {len(train_loader)}")
@@ -145,12 +152,43 @@ def main():
         )
         logger.info("Using CosineAnnealingLR scheduler with linear warmup")
 
+    start_epoch = 1
+    if args.resume_from:
+        resume_path = Path(args.resume_from)
+        if resume_path.is_file():
+            logger.info(f"Attempting to resume training from {resume_path}...")
+            ckpt = torch.load(resume_path, map_location=train_config.device, weights_only=False)
+
+            model.load_state_dict(ckpt['model_state_dict'])
+            if optimizer and ckpt.get('optimizer_state_dict'):
+                optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+            if scheduler and ckpt.get('scheduler_state_dict'):
+                scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+            if ema and ckpt.get('ema_model_state_dict'):
+                ema.ema_model.load_state_dict(ckpt['ema_model_state_dict'])
+
+            start_epoch = ckpt.get('epoch', 0) + 1
+            if ckpt.get('val_lsd'):
+                best_val_lsd = ckpt.get('val_lsd')
+
+            steps_per_epoch = math.ceil(len(train_loader) / train_config.accumulation_steps)
+            global_step = (start_epoch - 1) * steps_per_epoch
+
+            if scheduler:
+                logger.info(f"Fast-forwarding scheduler to step {global_step} to match new epoch timeline...")
+                for _ in range(global_step):
+                    scheduler.step()
+
+            logger.success(f"Successfully loaded checkpoint! Resuming from epoch {start_epoch}")
+        else:
+            logger.error(f"Checkpoint file {resume_path} not found! Starting from scratch.")
+
     # ==========================================
     # MAIN TRAINING LOOP
     # ==========================================
     logger.info("Starting training loop")
 
-    for epoch in range(1, train_config.epochs + 1):
+    for epoch in range(start_epoch, train_config.epochs + 1):
         # --- TRAIN PHASE ---
         model.train()
         train_start_time = time.time()
