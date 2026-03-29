@@ -159,7 +159,12 @@ class DiTModel(BaseModel):
         )
 
         in_channels = config.mel_bins + 1
-        self.input_proj = nn.Conv1d(in_channels=in_channels, out_channels=config.hidden_size, kernel_size=1)
+        self.input_proj = nn.Conv1d(
+            in_channels=in_channels,
+            out_channels=config.hidden_size,
+            kernel_size=5,
+            padding=2
+        )
 
         self.pos_embed = nn.Parameter(torch.zeros(1, config.max_seq_len, config.hidden_size))
         nn.init.trunc_normal_(self.pos_embed, std=0.02)

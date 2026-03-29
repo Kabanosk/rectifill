@@ -29,7 +29,7 @@ def sample_euler(
     text_emb: torch.Tensor,
     text_mask: torch.Tensor,
     mel_pad_mask: torch.Tensor,
-    num_steps: int = 20,
+    num_steps: int = 50,
     cfg_scale: float = 1.0
 ) -> torch.Tensor:
     """
@@ -40,6 +40,8 @@ def sample_euler(
     batch_size = x1_context.shape[0]
 
     x_t = torch.randn_like(x1_context)
+    noise_for_context = x_t.clone()
+
     dt = 1.0 / num_steps
     mask_float = mask_bool.to(torch.float32)
     uncond_text_emb = torch.zeros_like(text_emb)
@@ -49,7 +51,8 @@ def sample_euler(
         t = torch.full((batch_size,), t_val, device=device)
 
         # Enforce context
-        x_t = torch.where(mask_bool, x_t, x1_context)
+        x_t_exact_context = t_val * x1_context + (1.0 - t_val) * noise_for_context
+        x_t = torch.where(mask_bool, x_t, x_t_exact_context)
 
         with torch.no_grad():
             v_cond = model(xt=x_t, mask=mask_float, t=t, text_emb=text_emb, text_mask=text_mask,

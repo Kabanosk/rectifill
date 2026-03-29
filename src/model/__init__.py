@@ -3,7 +3,6 @@ from loguru import logger
 from src.config.config import ModelConfig
 from src.model.base import BaseModel
 from src.model.dit import DiTModel
-from src.model.interpolate import InterpolationBaseline
 
 
 def get_model(model_name: str, model_config: ModelConfig = None) -> BaseModel:
@@ -18,8 +17,6 @@ def get_model(model_name: str, model_config: ModelConfig = None) -> BaseModel:
     logger.info(f"Instantiating model architecture: {model_name}")
 
     match model_name.lower():
-        case "interpolate":
-            return InterpolationBaseline()
         case "rfm_dit":
            return DiTModel(model_config)
         case _:
