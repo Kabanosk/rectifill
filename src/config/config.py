@@ -44,9 +44,9 @@ class WandbConfig:
 @dataclasses.dataclass
 class ModelConfig:
     # Architecture dimensions
-    hidden_size: int = 256
-    depth: int = 12
-    num_heads: int = 8
+    hidden_size: int = 384
+    depth: int = 6
+    num_heads: int = 12
     dropout: float = 0.2
 
     # Audio & Text
@@ -68,7 +68,7 @@ class TrainConfig:
     learning_rate: float = 3e-4
     # for lr scheduler
     eta_min: float = 1e-6
-    warmup_steps: int = 6000
+    warmup_steps: int = 500
 
     weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0

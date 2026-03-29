@@ -65,4 +65,5 @@ def sample_euler(
         x_t = x_t + v_pred * dt
 
     x_t = torch.where(mask_bool, x_t, x1_context)
+    x_t = torch.clamp(x_t, min=-1.0, max=1.0)
     return x_t

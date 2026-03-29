@@ -1,9 +1,11 @@
 import math
+
 import torch
 import torch.nn as nn
 
 from src.config.config import ModelConfig
 from src.model.base import BaseModel
+
 
 class SinusoidalPositionEmbeddings(nn.Module):
     """
@@ -197,7 +199,7 @@ class DiTModel(BaseModel):
         mel_pad_mask = kwargs.get("mel_pad_mask", None)
 
         # --- Timestep Embedding ---
-        t_emb = self.time_mlp(t)  # [Batch, Hidden_Size]
+        t_emb = self.time_mlp(t * 1000.0)  # [Batch, Hidden_Size]
 
         # --- Input Projection ---
         x = torch.cat([xt, mask], dim=1)  # [Batch, Mel_Bins + 1, Time]
