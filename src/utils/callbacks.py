@@ -33,3 +33,13 @@ class EMACallback(Callback):
         """
         if trainer.global_step % self.update_every == 0:
             pl_module.ema_model.update(pl_module.model)
+
+    def on_save_checkpoint(self, trainer: pl.Trainer, pl_module: pl.LightningModule, checkpoint: dict):
+        """Saves the EMA weights into the Lightning checkpoint."""
+        if getattr(pl_module, "ema_model", None) is not None:
+            checkpoint["ema_model_state_dict"] = pl_module.ema_model.ema_model.state_dict()
+
+    def on_load_checkpoint(self, trainer: pl.Trainer, pl_module: pl.LightningModule, checkpoint: dict):
+        """Extracts the EMA weights from the Lightning checkpoint."""
+        if "ema_model_state_dict" in checkpoint:
+            self._ema_state_dict_to_load = checkpoint["ema_model_state_dict"]
