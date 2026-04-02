@@ -11,7 +11,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.datamodule import LibriSpeechDataModule
-from src.model.dit import DiTModel
+from src.model import get_model
 from src.model.lit_rfm import LitRFM
 from src.utils.callbacks import EMACallback
 
@@ -96,7 +96,7 @@ def main():
     datamodule = LibriSpeechDataModule(train_config=train_data_config, val_config=val_data_config)
     datamodule.setup()
 
-    core_model = DiTModel(train_config.model_params)
+    core_model = get_model(train_config.model_name, train_config.model_params)
     steps_per_epoch = math.ceil(len(datamodule.train_dataloader()) / train_config.accumulation_steps)
 
     lit_model = LitRFM(core_model=core_model, config=train_config, steps_per_epoch=steps_per_epoch)
