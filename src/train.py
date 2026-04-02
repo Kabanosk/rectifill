@@ -132,11 +132,14 @@ def main():
             resume="allow" if args.wandb_id else None
         )
 
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+    precision = "16-mixed" if accelerator == "gpu" else "32-true"
+
     trainer = pl.Trainer(
         max_epochs=train_config.epochs,
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        accelerator=accelerator,
         devices=args.devices,
-        precision="16-mixed",
+        precision=precision,
         accumulate_grad_batches=train_config.accumulation_steps,
         gradient_clip_val=train_config.gradient_clip_val,
         logger=wandb_logger,
