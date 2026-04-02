@@ -5,7 +5,7 @@ import torch.nn as nn
 
 
 class ModelEMA:
-    def __init__(self, model: nn.Module, decay: float = 0.9999):
+    def __init__(self, model: nn.Module | torch.Tensor, decay: float = 0.9999):
         """
         Exponential Moving Average of model parameters.
 
@@ -20,7 +20,7 @@ class ModelEMA:
             param.requires_grad_(False)
 
     @torch.no_grad()
-    def update(self, model: nn.Module):
+    def update(self, model: nn.Module | torch.Tensor):
         """
         Smoothly updates the EMA model weights based on the active model.
 

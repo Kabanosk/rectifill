@@ -1,11 +1,11 @@
 from loguru import logger
+import torch.nn as nn
 
 from src.config.config import ModelConfig
-from src.model.base import BaseModel
 from src.model.dit import DiTModel
 
 
-def get_model(model_name: str, model_config: ModelConfig = None) -> BaseModel:
+def get_model(model_name: str, model_config: ModelConfig) -> nn.Module:
     """
     Factory function to instantiate the chosen model architecture.
 

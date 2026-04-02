@@ -16,4 +16,5 @@ dependencies = [
 	"ruff>=0.15.1",
 	"matplotlib>=3.10.8",
 	"wandb>=0.25.1",
+	"lightning>=2.6.1",
 ]

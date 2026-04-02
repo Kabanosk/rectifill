@@ -4,71 +4,7 @@ import torch
 import torch.nn as nn
 
 from src.config.config import ModelConfig
-from src.model.base import BaseModel
-
-
-class SinusoidalPositionEmbeddings(nn.Module):
-    """
-    Generates sinusoidal positional embeddings for the diffusion timestep 't'.
-    This allows the model to know exactly at which noise level it currently operates.
-    """
-
-    def __init__(self, dim: int):
-        """
-        :param dim: The hidden dimension size of the embeddings.
-        """
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, time: torch.Tensor) -> torch.Tensor:
-        """
-        Computes the sinusoidal embeddings for the given timesteps.
-
-        :param time: Tensor of shape [Batch_Size] containing diffusion timesteps.
-        :return: Tensor of shape [Batch_Size, Dim] with sinusoidal embeddings.
-        """
-        device = time.device
-        half_dim = self.dim // 2
-        embeddings = math.log(10000) / (half_dim - 1)
-        embeddings = torch.exp(torch.arange(half_dim, device=device) * -embeddings)
-        embeddings = time[:, None] * embeddings[None, :]
-        embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
-        return embeddings
-
-
-class ModulatedLayerNorm(nn.Module):
-    """
-    Adaptive Layer Normalization (adaLN).
-    Instead of learning static affine parameters, it dynamically predicts
-    the scale and shift based on the diffusion timestep embedding.
-    """
-
-    def __init__(self, hidden_size: int, condition_dim: int):
-        """
-        :param hidden_size: The feature dimension of the input tensor (audio patches).
-        :param condition_dim: The dimension of the conditioning tensor (timestep embedding).
-        """
-        super().__init__()
-        self.ln = nn.LayerNorm(hidden_size, elementwise_affine=False)
-        self.mlp = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(condition_dim, 2 * hidden_size)
-        )
-        nn.init.zeros_(self.mlp[1].weight)
-        nn.init.zeros_(self.mlp[1].bias)
-
-    def forward(self, x: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
-        """
-        Applies modulated layer normalization to the input tensor.
-
-        :param x: Input tensor of shape [Batch, Seq_Len, Hidden_Size].
-        :param condition: Timestep embedding of shape [Batch, Condition_Dim].
-        :return: Normalized and modulated tensor of shape [Batch, Seq_Len, Hidden_Size].
-        """
-        emb_out = self.mlp(condition)
-        shift, scale = emb_out.chunk(2, dim=-1)
-
-        return self.ln(x) * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+from src.model.modules import SinusoidalPositionEmbeddings, ModulatedLayerNorm
 
 
 class DiTBlock(nn.Module):
@@ -138,7 +74,7 @@ class DiTBlock(nn.Module):
         return x
 
 
-class DiTModel(BaseModel):
+class DiTModel(nn.Module):
     """
     Main Diffusion Transformer architecture for Audio Inpainting.
     Predicts the velocity field for Rectified Flow Matching.
@@ -203,10 +139,7 @@ class DiTModel(BaseModel):
         text_mask = kwargs.get("text_mask", None)
         mel_pad_mask = kwargs.get("mel_pad_mask", None)
 
-        # --- Timestep Embedding ---
         t_emb = self.time_mlp(t * 1000.0)  # [Batch, Hidden_Size]
-
-        # --- Input Projection ---
         x = torch.cat([xt, mask], dim=1)  # [Batch, Mel_Bins + 1, Time]
 
         # Project to hidden dimensions
@@ -218,20 +151,10 @@ class DiTModel(BaseModel):
         x = x + self.pos_embed[:, :seq_len, :]
         x = self.input_dropout(x)
 
-        # --- Process through DiT Blocks ---
         for block in self.blocks:
             x = block(x, cond=t_emb, text_emb=text_emb, text_mask=text_mask, mel_pad_mask=mel_pad_mask)
 
-        # --- Output Projection ---
         x = x.transpose(1, 2)  # [Batch, Hidden_Size, Time]
 
-        # Predict velocity field v
         velocity = self.output_proj(x)  # [Batch, Mel_Bins, Time]
-
         return velocity
-
-    def configure_optimizers(self, **kwargs) -> torch.optim.Optimizer:
-        """
-        Implementation of the abstract method from BaseModel.
-        """
-        return torch.optim.AdamW(self.parameters(), **kwargs)
