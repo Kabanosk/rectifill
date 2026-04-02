@@ -110,7 +110,7 @@ def main():
     callbacks: list[pl.Callback] = [
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename=f"{train_config.model_name}-{{epoch:02d}}-{{val/lsd:.4f}}",
+            filename=f"{train_config.model_name}-{{epoch:02d}}",
             monitor="val/lsd",
             mode="min",
             save_top_k=3,
