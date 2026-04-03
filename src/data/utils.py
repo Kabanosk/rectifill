@@ -12,7 +12,7 @@ def load_wav(wav_path, sample_rate=16000) -> torch.Tensor:
     :param sample_rate: Target sample rate (default: 16000).
     :return: A tensor containing the audio data, resampled to the target sample rate.
     """
-    wav, sr = torchaudio.load(wav_path)
+    wav, sr = torchaudio.load(wav_path, backend="soundfile")
     if sr != sample_rate:
         wav = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)(wav)
     return wav

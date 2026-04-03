@@ -113,7 +113,7 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
             inputs = tokenizer(text_with_silence, return_tensors="pt", padding=True, truncation=True).to(device)
             with torch.no_grad():
                 outputs = text_encoder(**inputs)
-                embedding = outputs.last_hidden_state.squeeze(0).cpu()
+                embedding = outputs.last_hidden_state[0].cpu()
 
             # --- Safety Check ---
             if embedding.shape[0] != durations.shape[0]:
