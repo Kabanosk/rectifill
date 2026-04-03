@@ -26,6 +26,7 @@ class LibriSpeechCollator:
         # Extract features from the batch list
         mels = [item['mel'] for item in batch]  # List of [1, 128, T]
         inpainting_masks = [item['inpainting_mask'] for item in batch]  # List of [T]
+        durations = [item['durations'] for item in batch]
         embeddings = [item['embedding'] for item in batch]  # List of [Seq_Len, 768]
         texts = [item['text'] for item in batch]
         ids = [item['id'] for item in batch]
@@ -59,8 +60,9 @@ class LibriSpeechCollator:
         inpainting_masks_tensor = torch.stack(padded_inpainting_masks).unsqueeze(1)  # [B, 1, Max_Time]
         pad_attention_masks_tensor = torch.stack(pad_attention_masks)  # [B, Max_Time]
 
-        # Pad Text Embeddings along the sequence length
+        # Pad Text Embeddings and Durations along the sequence length
         embeddings_tensor = pad_sequence(embeddings, batch_first=True, padding_value=0.0)  # [B, Max_Seq, 768]
+        durations_tensor = pad_sequence(durations, batch_first=True, padding_value=0)  # [B, Max_Seq]
 
         # Create text attention masks
         text_lengths = torch.tensor([emb.shape[0] for emb in embeddings], dtype=torch.long)
@@ -74,6 +76,7 @@ class LibriSpeechCollator:
             "inpainting_mask": inpainting_masks_tensor,  # [B, 1, T] - Hole
             "mel_padding_mask": pad_attention_masks_tensor,  # [B, T] - Ignore padding in Attention
             "embedding": embeddings_tensor,  # [B, Seq, 768] - Guidance
+            "durations": durations_tensor,  # [B, Seq] - Alignment
             "text_padding_mask": text_masks_tensor,  # [B, Seq]
             "text": texts,
             "id": ids,
@@ -106,7 +109,7 @@ class LibriSpeechDataset(Dataset):
             reader = csv.reader(f, delimiter="|")
             next(reader)  # Skip header
             for row in reader:
-                if len(row) == 3:
+                if len(row) == 4:
                     self.samples.append(row)
 
         logger.info(f"Dataset loaded. Found {len(self.samples)} valid samples.")
@@ -115,9 +118,10 @@ class LibriSpeechDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx: int) -> Optional[dict]:
-        mel_file, emb_file, text = self.samples[idx]
+        mel_file, emb_file, dur_file, text = self.samples[idx]
         mel_path = self.data_dir / mel_file
         emb_path = self.data_dir / emb_file
+        dur_path = self.data_dir / dur_file
 
         try:
             mel_spec = torch.load(mel_path, weights_only=True)
@@ -131,10 +135,13 @@ class LibriSpeechDataset(Dataset):
             time_frames = mel_spec.shape[-1]
             inpainting_mask = self.mask_generator(time_frames)
 
+            durations = torch.load(dur_path, weights_only=True)
+
             return {
                 "mel": mel_spec,
                 "inpainting_mask": inpainting_mask,
                 "embedding": embedding,
+                "durations": durations,
                 "text": text,
                 "id": mel_file.replace("_mel.pt", "")
             }

@@ -37,8 +37,8 @@ def parse_args() -> argparse.Namespace:
                         help="Maximum sequence length for Mel-spectrograms.")
 
     # --- Training Arguments ---
-    parser.add_argument("--model_name", type=str, default="rfm_dit",
-                        help="Model architecture to use (e.g., 'interpolate', 'rfm_dit').")
+    parser.add_argument("--model_name", type=str, default="rfm_dit", choices=["rfm_dit", "aligned_dit"],
+                        help="Model architecture to use (e.g., 'rfm_dit', 'aligned_dit').")
     parser.add_argument("--checkpoint_path", type=str, default=default_train.checkpoint_path,
                         help="Checkpoint directory path.")
     parser.add_argument("--log_interval", type=int, default=default_train.log_interval,
@@ -110,8 +110,8 @@ def main():
     callbacks: list[pl.Callback] = [
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename=f"{train_config.model_name}-{{epoch:02d}}",
-            monitor="val/lsd",
+            filename=f"{train_config.model_name}-{{epoch:02d}}-{{val/epoch_lsd}}",
+            monitor="val/epoch_lsd",
             mode="min",
             save_top_k=3,
             save_last=True
