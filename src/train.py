@@ -55,7 +55,8 @@ def parse_args() -> argparse.Namespace:
                         help="Random seed for reproducibility.")
 
     # --- Lightning Specific Args ---
-    parser.add_argument("--devices", type=int, default=1, help="Number of GPUs to use")
+    parser.add_argument("--devices", type=int, default=default_train.devices, help="Number of GPUs to use")
+    parser.add_argument("--strategy", type=str, default=default_train.strategy, help="Distributed training strategy (e.g., 'ddp', 'auto')")
     parser.add_argument("--resume_from", type=str, default=None, help="Path to .ckpt to resume training")
     parser.add_argument("--wandb_id", type=str, default=None, help="WandB Run ID to resume")
 
@@ -74,7 +75,9 @@ def main():
         weight_decay=args.weight_decay,
         gradient_clip_val=args.gradient_clip_val,
         seed=args.seed,
-        log_interval=args.log_interval
+        log_interval=args.log_interval,
+        devices=args.devices,
+        strategy=args.strategy,
     )
 
     pl.seed_everything(train_config.seed, workers=True)
@@ -116,6 +119,14 @@ def main():
             save_top_k=3,
             save_last=True
         ),
+        ModelCheckpoint(
+            dirpath=checkpoint_dir,
+            filename=f"{train_config.model_name}-LOSS-{{epoch:02d}}-{{val/epoch_loss:.4f}}",
+            monitor="val/epoch_loss",
+            mode="min",
+            save_top_k=2,
+            save_last=False
+        ),
         LearningRateMonitor(logging_interval='step'),
     ]
 
@@ -138,7 +149,8 @@ def main():
     trainer = pl.Trainer(
         max_epochs=train_config.epochs,
         accelerator=accelerator,
-        devices=args.devices,
+        devices=train_config.devices,
+        strategy=train_config.strategy,
         precision=precision,
         accumulate_grad_batches=train_config.accumulation_steps,
         gradient_clip_val=train_config.gradient_clip_val,
