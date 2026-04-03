@@ -7,7 +7,7 @@ from loguru import logger
 import torch
 import lightning.pytorch as pl
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor, RichProgressBar
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.datamodule import LibriSpeechDataModule
@@ -128,6 +128,7 @@ def main():
             save_last=False
         ),
         LearningRateMonitor(logging_interval='step'),
+        RichProgressBar(leave=True),
     ]
 
     if train_config.use_ema:
