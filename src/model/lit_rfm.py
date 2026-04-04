@@ -48,11 +48,10 @@ class LitRFM(pl.LightningModule):
 
         v_pred = self.model(xt=xt, mask=mask_float, t=t, **condition_kwargs)
 
-        loss = F.mse_loss(v_pred, target_v, reduction='none')
-        masked_loss = loss[mask_bool.expand_as(loss)].mean()
+        loss = F.mse_loss(v_pred, target_v, reduction='mean')
 
-        self.log("train/loss", masked_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=len(batch))
-        return masked_loss
+        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=len(batch))
+        return loss
 
     def validation_step(self, batch: dict, batch_idx: int) -> None:
         eval_model = self.ema_model.ema_model if self.ema_model else self.model

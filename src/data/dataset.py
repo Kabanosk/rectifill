@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 
 from src.config.config import DataConfig
-from src.data.utils import RandomInpaintingMasker
+from src.data.utils import RandomInpaintingMasker, SemanticMasker
 
 
 class LibriSpeechCollator:
@@ -90,14 +90,10 @@ class LibriSpeechDataset(Dataset):
     """
 
     def __init__(self, data_dir: str | Path, max_mel_length: Optional[int] = None):
-        """
-        :param data_dir: Directory containing the processed .pt files and metadata.csv.
-        :param max_mel_length: Optional maximum length of mel frames to prevent memory issues.
-        """
         self.data_dir = Path(data_dir)
         self.metadata_path = self.data_dir / "metadata.csv"
         self.max_mel_length = max_mel_length
-        self.mask_generator = RandomInpaintingMasker(min_hole_ratio=0.1, max_hole_ratio=0.4)
+        self.mask_generator = SemanticMasker(min_tokens=2, max_tokens=12)
 
         if not self.metadata_path.exists():
             raise FileNotFoundError(f"Metadata file not found at {self.metadata_path}. Run preparation script first.")
@@ -127,15 +123,13 @@ class LibriSpeechDataset(Dataset):
             mel_spec = torch.load(mel_path, weights_only=True)
             embedding = torch.load(emb_path, weights_only=True)
 
-            # Enforce max length if provided in config
+            durations = torch.load(dur_path, weights_only=True)
             if self.max_mel_length and mel_spec.shape[-1] > self.max_mel_length:
                 mel_spec = mel_spec[..., :self.max_mel_length]
 
-            # Generate the inpainting mask dynamically for this specific audio
+            # Generate the semantic inpainting mask based on durations
             time_frames = mel_spec.shape[-1]
-            inpainting_mask = self.mask_generator(time_frames)
-
-            durations = torch.load(dur_path, weights_only=True)
+            inpainting_mask = self.mask_generator(time_frames, durations)
 
             return {
                 "mel": mel_spec,
