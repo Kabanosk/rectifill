@@ -86,7 +86,7 @@ class LibriSpeechCollator:
 class LibriSpeechDataset(Dataset):
     """
     PyTorch Dataset for loading precomputed Log-Mel-Spectrograms and T5 embeddings.
-    Dynamically generates masks for the inpainting task using RandomInpaintingMasker.
+    Dynamically generates masks for the inpainting task.
     """
 
     def __init__(self, data_dir: str | Path, max_mel_length: Optional[int] = None):
