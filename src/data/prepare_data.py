@@ -117,8 +117,7 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
 
             # --- Safety Check ---
             if embedding.shape[0] != durations.shape[0]:
-                logger.warning(
-                    f"Shape mismatch for {file_id}: Emb {embedding.shape[1]} vs Dur {durations.shape[0]}. Skipping.")
+                logger.warning(f"Shape mismatch for {file_id}: Emb {embedding.shape[0]} vs Dur {durations.shape[0]}. Skipping.")
                 continue
 
             output_emb_path = output_dir / f"{file_id}_emb.pt"
