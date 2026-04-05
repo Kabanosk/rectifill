@@ -21,7 +21,7 @@ class TextConfig:
 class DataConfig:
     """Main data configuration for the dataset and dataloaders."""
     data_path: str | pathlib.Path = "data"
-    batch_size: int = 8
+    batch_size: int = 64
     num_workers: int = 4
     shuffle: bool = True
     drop_last: bool = False
@@ -44,8 +44,8 @@ class WandbConfig:
 @dataclasses.dataclass
 class ModelConfig:
     # Architecture dimensions
-    hidden_size: int = 384
-    depth: int = 6
+    hidden_size: int = 768
+    depth: int = 12
     num_heads: int = 12
     dropout: float = 0.2
 
@@ -60,7 +60,7 @@ class TrainConfig:
     """Configuration for the training process. """
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/run_14_ema"
+    checkpoint_path: str = "checkpoints/base"
     log_interval: int = 100
     epochs: int = 50
     seed: int = 42
@@ -72,7 +72,7 @@ class TrainConfig:
 
     weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0
-    accumulation_steps: int = 8  # for gradient accumulation
+    accumulation_steps: int = 1  # for gradient accumulation
 
     validation_metrics_steps: int = 5
 
@@ -84,6 +84,10 @@ class TrainConfig:
     use_ema: bool = True
     ema_decay: float = 0.9999
     ema_update_every: int = 1
+
+    # distributed training params
+    devices: int = 1
+    strategy: str = "auto"  # "auto", "ddp", etc.
 
     model_params: ModelConfig = dataclasses.field(default_factory=ModelConfig)
     wandb_params: WandbConfig = dataclasses.field(default_factory=WandbConfig)

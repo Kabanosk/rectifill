@@ -12,7 +12,7 @@ def load_wav(wav_path, sample_rate=16000) -> torch.Tensor:
     :param sample_rate: Target sample rate (default: 16000).
     :return: A tensor containing the audio data, resampled to the target sample rate.
     """
-    wav, sr = torchaudio.load(wav_path)
+    wav, sr = torchaudio.load(wav_path, backend="soundfile")
     if sr != sample_rate:
         wav = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)(wav)
     return wav
@@ -136,5 +136,64 @@ class RandomInpaintingMasker:
 
         # Set the hole region to True
         mask[start_idx: start_idx + hole_length] = True
+
+        return mask
+
+
+class SemanticMasker:
+    """
+    Generates contiguous binary masks for audio inpainting based on semantic
+    text units (T5 sub-tokens) rather than arbitrary mel-spectrogram frames.
+    """
+
+    def __init__(self, min_tokens: int = 2, max_tokens: int = 15):
+        """
+        :param min_tokens: Minimum number of text tokens to mask.
+        :param max_tokens: Maximum number of text tokens to mask.
+        """
+        self.min_tokens = min_tokens
+        self.max_tokens = max_tokens
+
+    def __call__(self, time_frames: int, durations: torch.Tensor) -> torch.Tensor:
+        """
+        Generates a 1D boolean mask for the time dimension.
+
+        :param time_frames: The actual length of the spectrogram in the time dimension.
+        :param durations: Tensor of shape [Seq_Len] containing mel-frame duration for each text token.
+        :return: Boolean tensor of shape [Time] where True represents the hole.
+        """
+        mask = torch.zeros(time_frames, dtype=torch.bool)
+        seq_len = durations.shape[0]
+
+        if seq_len == 0:
+            return mask
+
+        high_limit = min(self.max_tokens + 1, seq_len + 1)
+        if self.min_tokens >= high_limit:
+            num_tokens_to_mask = seq_len
+        else:
+            num_tokens_to_mask = torch.randint(
+                low=self.min_tokens,
+                high=high_limit,
+                size=(1,)
+            ).item()
+
+        max_start_idx = max(0, seq_len - num_tokens_to_mask)
+        start_token_idx = torch.randint(low=0, high=max_start_idx + 1, size=(1,)).item()
+
+        start_frame = durations[:start_token_idx].sum().item()
+        mask_frames = durations[start_token_idx: start_token_idx + num_tokens_to_mask].sum().item()
+
+        start_frame = min(start_frame, time_frames)
+        end_frame = min(start_frame + mask_frames, time_frames)
+
+        # Apply the mask
+        if start_frame < end_frame:
+            mask[start_frame:end_frame] = True
+
+        if not mask.any() and time_frames > 0:
+            fallback_len = min(time_frames // 4, 20)
+            fallback_start = torch.randint(low=0, high=max(1, time_frames - fallback_len), size=(1,)).item()
+            mask[fallback_start: fallback_start + fallback_len] = True
 
         return mask

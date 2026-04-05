@@ -7,7 +7,7 @@ from loguru import logger
 import torch
 import lightning.pytorch as pl
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor, RichProgressBar
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.datamodule import LibriSpeechDataModule
@@ -37,8 +37,8 @@ def parse_args() -> argparse.Namespace:
                         help="Maximum sequence length for Mel-spectrograms.")
 
     # --- Training Arguments ---
-    parser.add_argument("--model_name", type=str, default="rfm_dit",
-                        help="Model architecture to use (e.g., 'interpolate', 'rfm_dit').")
+    parser.add_argument("--model_name", type=str, default="rfm_dit", choices=["rfm_dit", "aligned_dit"],
+                        help="Model architecture to use (e.g., 'rfm_dit', 'aligned_dit').")
     parser.add_argument("--checkpoint_path", type=str, default=default_train.checkpoint_path,
                         help="Checkpoint directory path.")
     parser.add_argument("--log_interval", type=int, default=default_train.log_interval,
@@ -55,7 +55,8 @@ def parse_args() -> argparse.Namespace:
                         help="Random seed for reproducibility.")
 
     # --- Lightning Specific Args ---
-    parser.add_argument("--devices", type=int, default=1, help="Number of GPUs to use")
+    parser.add_argument("--devices", type=int, default=default_train.devices, help="Number of GPUs to use")
+    parser.add_argument("--strategy", type=str, default=default_train.strategy, help="Distributed training strategy (e.g., 'ddp', 'auto')")
     parser.add_argument("--resume_from", type=str, default=None, help="Path to .ckpt to resume training")
     parser.add_argument("--wandb_id", type=str, default=None, help="WandB Run ID to resume")
 
@@ -74,7 +75,9 @@ def main():
         weight_decay=args.weight_decay,
         gradient_clip_val=args.gradient_clip_val,
         seed=args.seed,
-        log_interval=args.log_interval
+        log_interval=args.log_interval,
+        devices=args.devices,
+        strategy=args.strategy,
     )
 
     pl.seed_everything(train_config.seed, workers=True)
@@ -110,13 +113,22 @@ def main():
     callbacks: list[pl.Callback] = [
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename=f"{train_config.model_name}-{{epoch:02d}}",
-            monitor="val/lsd",
+            filename=f"{train_config.model_name}-{{epoch:02d}}-{{val/epoch_lsd}}",
+            monitor="val/epoch_lsd",
             mode="min",
             save_top_k=3,
             save_last=True
         ),
+        ModelCheckpoint(
+            dirpath=checkpoint_dir,
+            filename=f"{train_config.model_name}-LOSS-{{epoch:02d}}-{{val/epoch_loss:.4f}}",
+            monitor="val/epoch_loss",
+            mode="min",
+            save_top_k=2,
+            save_last=False
+        ),
         LearningRateMonitor(logging_interval='step'),
+        RichProgressBar(leave=True),
     ]
 
     if train_config.use_ema:
@@ -138,7 +150,8 @@ def main():
     trainer = pl.Trainer(
         max_epochs=train_config.epochs,
         accelerator=accelerator,
-        devices=args.devices,
+        devices=train_config.devices,
+        strategy=train_config.strategy,
         precision=precision,
         accumulate_grad_batches=train_config.accumulation_steps,
         gradient_clip_val=train_config.gradient_clip_val,

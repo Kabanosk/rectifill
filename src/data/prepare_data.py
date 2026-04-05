@@ -8,6 +8,7 @@ from tqdm import tqdm
 from transformers import T5EncoderModel, T5Tokenizer
 
 from src.config.config import DataConfig, MelConfig, TextConfig
+from src.data.alignment import ForcedAligner, map_to_t5_tokens
 from src.data.utils import get_mel_transform, load_wav
 
 
@@ -58,7 +59,10 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
     # Initialization of models based on config
     logger.info(f"Loading text model ({config.text_params.model_name}) on {device}...")
     tokenizer = T5Tokenizer.from_pretrained(config.text_params.model_name)
+    logger.info("Adding <SIL> special token to T5 tokenizer...")
+    tokenizer.add_special_tokens({'additional_special_tokens': ['<SIL>']})
     text_encoder = T5EncoderModel.from_pretrained(config.text_params.model_name).to(device)
+    text_encoder.resize_token_embeddings(len(tokenizer))
     text_encoder.eval()
 
     logger.info("Initializing Mel-Spectrogram transform from config...")
@@ -67,6 +71,8 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
         n_mels=config.mel_params.n_mels
     ).to(device)
 
+    logger.info("Initializing Forced Aligner...")
+    aligner = ForcedAligner(device=device)
     flac_files = list(source_dir.rglob("*.flac"))
     logger.info(f"Found {len(flac_files)} audio files. Processing...")
 
@@ -90,11 +96,30 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
             output_mel_path = output_dir / f"{file_id}_mel.pt"
             torch.save(mel_spec, output_mel_path)
 
+            # --- Alignment ---
+            aligned_seq = aligner.compute_durations(
+                waveform=waveform,
+                transcript=text_content,
+                sample_rate=config.mel_params.sample_rate,
+                hop_length=config.mel_params.hop_length
+            )
+
+            durations, text_with_silence = map_to_t5_tokens(aligned_seq, tokenizer)
+
+            output_dur_path = output_dir / f"{file_id}_dur.pt"
+            torch.save(durations, output_dur_path)
+
             # --- Text Processing ---
-            inputs = tokenizer(text_content, return_tensors="pt", padding=True, truncation=True).to(device)
+            inputs = tokenizer(text_with_silence, return_tensors="pt", padding=True, truncation=True).to(device)
             with torch.no_grad():
                 outputs = text_encoder(**inputs)
-                embedding = outputs.last_hidden_state.squeeze(0).cpu()
+                embedding = outputs.last_hidden_state[0].cpu()
+
+            # --- Safety Check ---
+            if embedding.shape[0] != durations.shape[0]:
+                logger.warning(
+                    f"Shape mismatch for {file_id}: Emb {embedding.shape[1]} vs Dur {durations.shape[0]}. Skipping.")
+                continue
 
             output_emb_path = output_dir / f"{file_id}_emb.pt"
             torch.save(embedding, output_emb_path)
@@ -102,10 +127,9 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
             # --- Text Saving ---
             output_txt_path = output_dir / f"{file_id}.txt"
             with open(output_txt_path, "w", encoding="utf-8") as f:
-                f.write(text_content)
+                f.write(text_with_silence)
 
-            # Add to metadata
-            metadata.append([f"{file_id}_mel.pt", f"{file_id}_emb.pt", text_content])
+            metadata.append([f"{file_id}_mel.pt", f"{file_id}_emb.pt", f"{file_id}_dur.pt", text_with_silence])
 
         except Exception as e:
             logger.error(f"Error processing file {flac_path}: {e}")
@@ -114,7 +138,7 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
     csv_path = output_dir / "metadata.csv"
     with open(csv_path, "w", encoding="utf-8", newline="") as csvfile:
         writer = csv.writer(csvfile, delimiter="|")
-        writer.writerow(["mel_file", "embedding_file", "transcription"])
+        writer.writerow(["mel_file", "embedding_file", "duration_file", "transcription"])
         writer.writerows(metadata)
 
     logger.success(f"Done! Data saved in: {output_dir}")

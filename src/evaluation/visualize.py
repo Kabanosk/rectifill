@@ -50,17 +50,23 @@ def visualize_and_listen(checkpoint_path: str):
     text_mask = batch['text_padding_mask'].to(device)
     mel_pad_mask = batch['mel_padding_mask'].to(device)
 
+    condition_kwargs = {
+        "text_emb": text_emb,
+        "text_mask": text_mask,
+        "mel_pad_mask": mel_pad_mask
+    }
+    if 'durations' in batch:
+        condition_kwargs['durations'] = batch['durations'].to(device)
+
     logger.info("Running ODE solver (Euler)...")
     with torch.no_grad():
         generated_mel_norm = sample_euler(
             model=model,
             x1_context=mel_norm,
             mask_bool=mask_bool,
-            text_emb=text_emb,
-            text_mask=text_mask,
-            mel_pad_mask=mel_pad_mask,
             num_steps=50,
-            cfg_scale=train_config.cfg_scale
+            cfg_scale=train_config.cfg_scale,
+            **condition_kwargs
         )
 
     generated_mel_db = denormalize_mel(generated_mel_norm)
