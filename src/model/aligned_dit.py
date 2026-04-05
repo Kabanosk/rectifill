@@ -123,7 +123,8 @@ class AlignedDiTModel(nn.Module):
         mel_pad_mask = kwargs.get("mel_pad_mask")  # [B, T]
         cfg_drop_mask = kwargs.get("cfg_drop_mask", None)
 
-        assert text_emb is not None and durations is not None, "AlignedDiT requires text_emb and durations!"
+        if text_emb is not None and durations is not None:
+            raise ValueError("AlignedDiT requires text_emb and durations!")
 
         if cfg_drop_mask is not None:
             null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)

@@ -1,3 +1,5 @@
+import random
+
 import librosa
 import numpy as np
 import torch
@@ -195,5 +197,90 @@ class SemanticMasker:
             fallback_len = min(time_frames // 4, 20)
             fallback_start = torch.randint(low=0, high=max(1, time_frames - fallback_len), size=(1,)).item()
             mask[fallback_start: fallback_start + fallback_len] = True
+
+        return mask
+
+
+class UniversalMasker:
+    """
+    Universal Masking Strategy applied at the semantic level.
+    Ensures that masks always align perfectly with word/token boundaries
+    using the durations tensor. Enables training for TTS, Voice Cloning, and Inpainting.
+    """
+
+    def __init__(
+            self,
+            p_tts: float = 0.15,
+            p_continuation: float = 0.25,
+            p_prefix: float = 0.20,
+            p_inpainting: float = 0.40,
+            min_tokens_inpaint: int = 2,
+            max_tokens_inpaint: int = 15
+    ):
+        total = p_tts + p_continuation + p_prefix + p_inpainting
+        self.p_tts = p_tts / total
+        self.p_continuation = p_continuation / total
+        self.p_prefix = p_prefix / total
+        self.p_inpainting = p_inpainting / total
+
+        self.min_tokens = min_tokens_inpaint
+        self.max_tokens = max_tokens_inpaint
+
+    def __call__(self, time_frames: int, durations: torch.Tensor) -> torch.Tensor:
+        mask = torch.zeros(time_frames, dtype=torch.bool)
+        seq_len = durations.shape[0]
+
+        if seq_len < 3:
+            mask[:] = True
+            return mask
+
+        rand_val = random.random()
+        cumulative = self.p_tts
+
+        # --- TTS MASK ---
+        if rand_val < cumulative:
+            mask[:] = True
+            return mask
+
+        cumulative += self.p_continuation
+
+        # --- CONTINUATION MASK ---
+        if rand_val < cumulative:
+            # Leave at least 1 token as a prompt, mask the rest
+            start_token = random.randint(1, seq_len - 1)
+            start_frame = durations[:start_token].sum().item()
+            mask[start_frame:] = True
+            return mask
+
+        cumulative += self.p_prefix
+
+        # --- PREFIX MASK ---
+        if rand_val < cumulative:
+            end_token = random.randint(1, seq_len - 1)
+            end_frame = durations[:end_token].sum().item()
+            mask[:end_frame] = True
+            return mask
+
+        # --- INPAINTING MASK ---
+        high_limit = min(self.max_tokens + 1, seq_len + 1)
+        if self.min_tokens >= high_limit:
+            num_tokens_to_mask = seq_len
+        else:
+            num_tokens_to_mask = random.randint(self.min_tokens, high_limit - 1)
+
+        max_start_idx = max(0, seq_len - num_tokens_to_mask)
+        start_token_idx = random.randint(0, max_start_idx)
+
+        start_frame = durations[:start_token_idx].sum().item()
+        mask_frames = durations[start_token_idx: start_token_idx + num_tokens_to_mask].sum().item()
+
+        start_frame = min(start_frame, time_frames)
+        end_frame = min(start_frame + mask_frames, time_frames)
+
+        if start_frame < end_frame:
+            mask[start_frame:end_frame] = True
+
+        if not mask.any():
+            mask[:] = True
 
         return mask

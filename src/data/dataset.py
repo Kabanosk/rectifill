@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 
 from src.config.config import DataConfig
-from src.data.utils import RandomInpaintingMasker, SemanticMasker
+from src.data.utils import RandomInpaintingMasker, SemanticMasker, UniversalMasker
 
 
 class LibriSpeechCollator:
@@ -93,7 +93,14 @@ class LibriSpeechDataset(Dataset):
         self.data_dir = Path(data_dir)
         self.metadata_path = self.data_dir / "metadata.csv"
         self.max_mel_length = max_mel_length
-        self.mask_generator = SemanticMasker(min_tokens=2, max_tokens=12)
+        self.mask_generator = UniversalMasker(
+            p_tts=0.20,
+            p_continuation=0.15,
+            p_prefix=0.15,
+            p_inpainting=0.50,
+            min_tokens_inpaint=2,
+            max_tokens_inpaint=15
+        )
 
         if not self.metadata_path.exists():
             raise FileNotFoundError(f"Metadata file not found at {self.metadata_path}. Run preparation script first.")
