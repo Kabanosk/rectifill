@@ -17,7 +17,8 @@ def prepare_rfm_batch(
 
     # Context condition
     xt = torch.where(mask_bool.expand_as(x1), xt_hole, x1)
-    target_v = x1 - x0
+    target_v_hole = x1 - x0
+    target_v = torch.where(mask_bool.expand_as(x1), target_v_hole, torch.zeros_like(x1))
 
     return xt, target_v, t
 
