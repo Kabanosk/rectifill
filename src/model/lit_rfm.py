@@ -38,20 +38,22 @@ class LitRFM(pl.LightningModule):
         text_emb = batch['embedding']
 
         # CFG Dropout
+        cfg_drop_mask = None
         if self.config.cfg_prob > 0.0:
-            drop_mask = torch.rand(text_emb.shape[0], 1, 1, device=self.device) < self.config.cfg_prob
-            text_emb = torch.where(drop_mask, torch.zeros_like(text_emb), text_emb)
+            cfg_drop_mask = torch.rand(text_emb.shape[0], 1, 1, device=self.device) < self.config.cfg_prob
 
         condition_kwargs["text_emb"] = text_emb
+        condition_kwargs["cfg_drop_mask"] = cfg_drop_mask
 
         xt, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
 
         v_pred = self.model(xt=xt, mask=mask_float, t=t, **condition_kwargs)
 
-        loss = F.mse_loss(v_pred, target_v, reduction='mean')
+        loss = F.mse_loss(v_pred, target_v, reduction='none')
+        masked_loss = loss[mask_bool.expand_as(loss)].mean()
 
-        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=len(batch))
-        return loss
+        self.log("train/loss", masked_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=batch['mel'].shape[0])
+        return masked_loss
 
     def validation_step(self, batch: dict, batch_idx: int) -> None:
         eval_model = self.ema_model.ema_model if self.ema_model else self.model
@@ -65,6 +67,7 @@ class LitRFM(pl.LightningModule):
             "text_emb": batch['embedding'],
             "mel_pad_mask": batch.get('mel_padding_mask'),
             "text_mask": batch.get('text_padding_mask'),
+            "cfg_drop_mask": torch.zeros(batch['mel'].shape[0], 1, 1, dtype=torch.bool, device=self.device)
         }
         if 'durations' in batch:
             condition_kwargs['durations'] = batch['durations']
@@ -75,7 +78,7 @@ class LitRFM(pl.LightningModule):
 
         loss = F.mse_loss(v_pred, target_v, reduction='none')
         masked_loss = loss[mask_bool.expand_as(loss)].mean()
-        self.log("val/epoch_loss", masked_loss, prog_bar=True, sync_dist=True, batch_size=len(batch))
+        self.log("val/epoch_loss", masked_loss, prog_bar=True, sync_dist=True, batch_size=batch['mel'].shape[0])
 
         if batch_idx < self.config.validation_metrics_steps:
             generated_mel_norm = sample_euler(
@@ -88,7 +91,7 @@ class LitRFM(pl.LightningModule):
             )
             generated_mel = denormalize_mel(generated_mel_norm)
             batch_lsd = calculate_lsd(generated_mel, mel_raw, mask_bool)
-            self.log("val/epoch_lsd", batch_lsd, sync_dist=True, prog_bar=True, batch_size=len(batch))
+            self.log("val/epoch_lsd", batch_lsd, sync_dist=True, prog_bar=True, batch_size=batch['mel'].shape[0])
 
     def configure_optimizers(self) -> dict:
         optimizer = torch.optim.AdamW(

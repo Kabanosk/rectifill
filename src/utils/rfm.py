@@ -47,11 +47,10 @@ def sample_euler(
     uncond_kwargs = {}
     if cfg_scale != 1.0:
         for k, v in condition_kwargs.items():
-            if k == "text_emb" and v is not None:
-                uncond_kwargs[k] = torch.zeros_like(v)
-            else:
-                uncond_kwargs[k] = v
+            uncond_kwargs[k] = v
+        uncond_kwargs["cfg_drop_mask"] = torch.ones(batch_size, 1, 1, dtype=torch.bool, device=device)
 
+    condition_kwargs["cfg_drop_mask"] = torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
     for i in range(num_steps):
         t_val = i / num_steps
         t = torch.full((batch_size,), t_val, device=device)

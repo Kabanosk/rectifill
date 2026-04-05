@@ -87,7 +87,9 @@ class AlignedDiTModel(nn.Module):
         # Text Processing
         self.text_proj = nn.Linear(config.text_dim, config.hidden_size)
         self.length_regulator = LengthRegulator()
+        self.fusion_proj = nn.Linear(config.hidden_size * 2, config.hidden_size)
 
+        self.null_text_embed = nn.Parameter(torch.randn(1, 1, config.text_dim) * 0.02)
         self.pos_embed = nn.Parameter(torch.zeros(1, config.max_seq_len, config.hidden_size))
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
@@ -119,8 +121,13 @@ class AlignedDiTModel(nn.Module):
         text_emb = kwargs.get("text_emb")  # [B, Text_Seq_Len, 768]
         durations = kwargs.get("durations")  # [B, Text_Seq_Len]
         mel_pad_mask = kwargs.get("mel_pad_mask")  # [B, T]
+        cfg_drop_mask = kwargs.get("cfg_drop_mask", None)
 
         assert text_emb is not None and durations is not None, "AlignedDiT requires text_emb and durations!"
+
+        if cfg_drop_mask is not None:
+            null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)
+            text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
 
         t_emb = self.time_mlp(t * 1000.0)
         x_audio = torch.cat([xt, mask], dim=1)
@@ -139,7 +146,8 @@ class AlignedDiTModel(nn.Module):
             x_text_aligned = torch.nn.functional.pad(x_text_aligned, (0, 0, 0, pad_amount))
 
         # --- EARLY FUSION ---
-        x = x_audio + x_text_aligned
+        x_mixed = torch.cat([x_audio, x_text_aligned], dim=-1)
+        x = self.fusion_proj(x_mixed)  # [B, T, Hidden_Size]
 
         # --- TRANSFORMER ---
         x = x + self.pos_embed[:, :audio_time, :]
