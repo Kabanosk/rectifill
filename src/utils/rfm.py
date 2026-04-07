@@ -17,7 +17,8 @@ def prepare_rfm_batch(
 
     # Context condition
     xt = torch.where(mask_bool.expand_as(x1), xt_hole, x1)
-    target_v = x1 - x0
+    target_v_hole = x1 - x0
+    target_v = torch.where(mask_bool.expand_as(x1), target_v_hole, torch.zeros_like(x1))
 
     return xt, target_v, t
 
@@ -26,11 +27,9 @@ def sample_euler(
     model: torch.nn.Module,
     x1_context: torch.Tensor,
     mask_bool: torch.Tensor,
-    text_emb: torch.Tensor,
-    text_mask: torch.Tensor,
-    mel_pad_mask: torch.Tensor,
     num_steps: int = 50,
-    cfg_scale: float = 1.0
+    cfg_scale: float = 1.0,
+    **condition_kwargs
 ) -> torch.Tensor:
     """
     Solves the ODE using Euler's method to generate the inpainted spectrogram.
@@ -44,8 +43,14 @@ def sample_euler(
 
     dt = 1.0 / num_steps
     mask_float = mask_bool.to(torch.float32)
-    uncond_text_emb = torch.zeros_like(text_emb)
 
+    uncond_kwargs = {}
+    if cfg_scale != 1.0:
+        for k, v in condition_kwargs.items():
+            uncond_kwargs[k] = v
+        uncond_kwargs["cfg_drop_mask"] = torch.ones(batch_size, 1, 1, dtype=torch.bool, device=device)
+
+    condition_kwargs["cfg_drop_mask"] = torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
     for i in range(num_steps):
         t_val = i / num_steps
         t = torch.full((batch_size,), t_val, device=device)
@@ -55,14 +60,12 @@ def sample_euler(
         x_t = torch.where(mask_bool, x_t, x_t_exact_context)
 
         with torch.no_grad():
-            v_cond = model(xt=x_t, mask=mask_float, t=t, text_emb=text_emb, text_mask=text_mask,
-                           mel_pad_mask=mel_pad_mask)
+            v_cond = model(xt=x_t, mask=mask_float, t=t, **condition_kwargs)
 
             if cfg_scale == 1.0:
                 v_pred = v_cond
             else:
-                v_uncond = model(xt=x_t, mask=mask_float, t=t, text_emb=uncond_text_emb, text_mask=text_mask,
-                                 mel_pad_mask=mel_pad_mask)
+                v_uncond = model(xt=x_t, mask=mask_float, t=t, **uncond_kwargs)
                 v_pred = v_uncond + cfg_scale * (v_cond - v_uncond)
 
         x_t = x_t + v_pred * dt

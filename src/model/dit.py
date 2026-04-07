@@ -106,6 +106,7 @@ class DiTModel(nn.Module):
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         self.input_dropout = nn.Dropout(config.dropout)
+        self.null_text_embed = nn.Parameter(torch.randn(1, 1, config.text_dim) * 0.02)
 
         self.blocks = nn.ModuleList([
             DiTBlock(
@@ -138,6 +139,11 @@ class DiTModel(nn.Module):
         text_emb = kwargs.get("text_emb", None)
         text_mask = kwargs.get("text_mask", None)
         mel_pad_mask = kwargs.get("mel_pad_mask", None)
+        cfg_drop_mask = kwargs.get("cfg_drop_mask", None)
+
+        if text_emb is not None and cfg_drop_mask is not None:
+            null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)
+            text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
 
         t_emb = self.time_mlp(t * 1000.0)  # [Batch, Hidden_Size]
         x = torch.cat([xt, mask], dim=1)  # [Batch, Mel_Bins + 1, Time]
