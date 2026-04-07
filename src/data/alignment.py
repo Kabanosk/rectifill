@@ -22,6 +22,7 @@ class ForcedAligner:
 
         self.bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H
         self.model = self.bundle.get_model().to(device)
+        self.model.eval()
         self.labels = self.bundle.get_labels()
         self.dictionary = {c: i for i, c in enumerate(self.labels)}
 
