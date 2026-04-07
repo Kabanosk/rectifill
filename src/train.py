@@ -113,7 +113,7 @@ def main():
     callbacks: list[pl.Callback] = [
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename=f"{train_config.model_name}-{{epoch:02d}}-{{val/epoch_lsd}}",
+            filename=f"{train_config.model_name}-{{epoch:02d}}-{{val_epoch_lsd}}",
             monitor="val/epoch_lsd",
             mode="min",
             save_top_k=3,
@@ -121,7 +121,7 @@ def main():
         ),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename=f"{train_config.model_name}-LOSS-{{epoch:02d}}-{{val/epoch_loss:.4f}}",
+            filename=f"{train_config.model_name}-val-loss-{{epoch:02d}}-{{val_epoch_loss:.4f}}",
             monitor="val/epoch_loss",
             mode="min",
             save_top_k=2,
