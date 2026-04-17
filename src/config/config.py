@@ -1,5 +1,6 @@
 import dataclasses
 import pathlib
+from typing import Literal
 
 
 @dataclasses.dataclass
@@ -13,8 +14,10 @@ class MelConfig:
 
 @dataclasses.dataclass
 class TextConfig:
-    """Configuration for the text encoder."""
+    """Configuration for the text/context encoder."""
+    context_type: Literal["t5", "phonemes"] = "phonemes"
     model_name: str = "t5-base"
+    phoneme_vocab_size: int = 100
 
 
 @dataclasses.dataclass
@@ -43,6 +46,8 @@ class WandbConfig:
 
 @dataclasses.dataclass
 class ModelConfig:
+    context_type: Literal["t5", "phonemes"] = "phonemes"
+
     # Architecture dimensions
     hidden_size: int = 768
     depth: int = 12
@@ -53,6 +58,11 @@ class ModelConfig:
     mel_bins: int = 128
     text_dim: int = 768
     max_seq_len: int = 4000
+
+    # Phonemes
+    phoneme_vocab_size: int = 100
+    phoneme_layers: int = 4
+    phoneme_heads: int = 8
 
 
 @dataclasses.dataclass

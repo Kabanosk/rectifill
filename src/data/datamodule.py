@@ -26,11 +26,13 @@ class LibriSpeechDataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             self.train_dataset = LibriSpeechDataset(
                 data_dir=self.train_config.data_path,
-                max_mel_length=self.train_config.max_mel_length
+                max_mel_length=self.train_config.max_mel_length,
+                context_type=self.train_config.text_params.context_type,
             )
             self.val_dataset = LibriSpeechDataset(
                 data_dir=self.val_config.data_path,
-                max_mel_length=self.val_config.max_mel_length
+                max_mel_length=self.val_config.max_mel_length,
+                context_type=self.val_config.text_params.context_type,
             )
 
     def train_dataloader(self) -> DataLoader:

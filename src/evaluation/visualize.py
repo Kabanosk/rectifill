@@ -46,15 +46,17 @@ def visualize_and_listen(checkpoint_path: str):
     mel_raw = batch['mel'].squeeze(1).to(device)  # [1, 128, Time]
     mel_norm = normalize_mel(mel_raw)
     mask_bool = batch['inpainting_mask'].to(device)  # [1, 1, Time]
-    text_emb = batch['embedding'].to(device)
-    text_mask = batch['text_padding_mask'].to(device)
-    mel_pad_mask = batch['mel_padding_mask'].to(device)
 
     condition_kwargs = {
-        "text_emb": text_emb,
-        "text_mask": text_mask,
-        "mel_pad_mask": mel_pad_mask
+        "text_mask": batch['text_padding_mask'].to(device),
+        "mel_pad_mask": batch['mel_padding_mask'].to(device)
     }
+
+    if 'embedding' in batch:
+        condition_kwargs['text_emb'] = batch['embedding'].to(device)
+    elif 'phoneme_ids' in batch:
+        condition_kwargs['phoneme_ids'] = batch['phoneme_ids'].to(device)
+
     if 'durations' in batch:
         condition_kwargs['durations'] = batch['durations'].to(device)
 

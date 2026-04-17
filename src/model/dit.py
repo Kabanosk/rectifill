@@ -1,22 +1,20 @@
-import math
-
 import torch
 import torch.nn as nn
 
 from src.config.config import ModelConfig
-from src.model.modules import SinusoidalPositionEmbeddings, ModulatedLayerNorm
+from src.model.modules import SinusoidalPositionEmbeddings, ModulatedLayerNorm, PhonemeEncoder
 
 
 class DiTBlock(nn.Module):
     """
     A single block of the Diffusion Transformer.
-    Incorporates Self-Attention for audio context and Cross-Attention for text conditioning.
+    Incorporates Self-Attention for audio context and Cross-Attention for text/phonemes conditioning.
     """
 
     def __init__(self, hidden_size: int, num_heads: int, text_dim: int, cond_dim: int, dropout: float):
         """
         :param hidden_size: The feature dimension of the audio patches.
-        :param num_heads: Number of attention heads for MultiheadAttention.
+        :param num_heads: Number of attention heads for self and cross attention.
         :param text_dim: The feature dimension of the incoming text embeddings.
         :param cond_dim: The dimension of the conditioning tensor (timestep embedding).
         :param dropout: Dropout probability for regularization.
@@ -94,13 +92,21 @@ class DiTModel(nn.Module):
             nn.Linear(config.hidden_size * 4, config.hidden_size)
         )
 
-        in_channels = config.mel_bins + 1
+        in_channels = config.mel_bins + 1  # for mask
         self.input_proj = nn.Conv1d(
             in_channels=in_channels,
             out_channels=config.hidden_size,
             kernel_size=5,
             padding=2
         )
+
+        if self.config.context_type == "phonemes":
+            self.phoneme_encoder = PhonemeEncoder(
+                vocab_size=config.phoneme_vocab_size,
+                hidden_dim=config.text_dim,
+                num_layers=config.phoneme_layers,
+                num_heads=config.phoneme_heads,
+            )
 
         self.pos_embed = nn.Parameter(torch.zeros(1, config.max_seq_len, config.hidden_size))
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
@@ -133,13 +139,23 @@ class DiTModel(nn.Module):
             - t: Diffusion timestep of shape [Batch].
             - text_emb: Text embeddings of shape [Batch, Text_Seq_Len, Text_Dim].
             - text_mask: Optional boolean mask for text embeddings of shape [Batch, Text_Seq_Len].
+            - phonemes_ids: Optional phoneme IDs of shape [Batch, Text_Seq_Len] (used if context_type is "phonemes").
+            - mel_pad_mask (torch.Tensor): Padding mask for audio [Batch, Time].
+            - cfg_drop_mask (torch.Tensor): Boolean mask for context dropping during training [Batch, 1, 1].
+
         :return: Predicted velocity field of shape [Batch, Mel_Bins, Time].
         """
         t = kwargs["t"]
-        text_emb = kwargs.get("text_emb", None)
         text_mask = kwargs.get("text_mask", None)
         mel_pad_mask = kwargs.get("mel_pad_mask", None)
         cfg_drop_mask = kwargs.get("cfg_drop_mask", None)
+
+        if self.config.context_type == "phonemes":
+            phoneme_ids = kwargs.get("phoneme_ids")
+            # Convert raw IDs into dense contextualized embeddings via transformer
+            text_emb = self.phoneme_encoder(phoneme_ids, src_key_padding_mask=text_mask)
+        else:
+            text_emb = kwargs.get("text_emb", None)
 
         if text_emb is not None and cfg_drop_mask is not None:
             null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)

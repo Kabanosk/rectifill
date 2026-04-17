@@ -1,14 +1,16 @@
 import csv
 from pathlib import Path
 
+import nltk
 import torch
 import torchaudio
+from g2p_en import G2p
 from loguru import logger
 from tqdm import tqdm
 from transformers import T5EncoderModel, T5Tokenizer
 
 from src.config.config import DataConfig, MelConfig, TextConfig
-from src.data.alignment import ForcedAligner, map_to_t5_tokens
+from src.data.alignment import ForcedAligner, map_to_t5_tokens, map_to_phoneme_tokens
 from src.data.utils import get_mel_transform, load_wav
 
 
@@ -41,7 +43,7 @@ def load_transcripts(source_dir: Path) -> dict[str, str]:
 
 def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfig) -> None:
     """
-    Processes audio files (resampling), generates log-mel spectrograms and T5 embeddings,
+    Processes audio files (resampling), generates log-mel spectrograms and T5 embeddings/phonemes,
     and saves .pt + .txt pairs, all driven by the provided configuration.
 
     :param source_dir: Path to the directory containing the raw audio files and transcripts.
@@ -57,13 +59,26 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
     transcripts = load_transcripts(source_dir)
 
     # Initialization of models based on config
-    logger.info(f"Loading text model ({config.text_params.model_name}) on {device}...")
-    tokenizer = T5Tokenizer.from_pretrained(config.text_params.model_name)
-    logger.info("Adding <SIL> special token to T5 tokenizer...")
-    tokenizer.add_special_tokens({'additional_special_tokens': ['<SIL>']})
-    text_encoder = T5EncoderModel.from_pretrained(config.text_params.model_name).to(device)
-    text_encoder.resize_token_embeddings(len(tokenizer))
-    text_encoder.eval()
+    if config.text_params.context_type == "t5":
+        logger.info(f"Loading text model ({config.text_params.model_name}) on {device}...")
+        tokenizer = T5Tokenizer.from_pretrained(config.text_params.model_name)
+        logger.info("Adding <SIL> special token to T5 tokenizer...")
+        tokenizer.add_special_tokens({'additional_special_tokens': ['<SIL>']})
+        text_encoder = T5EncoderModel.from_pretrained(config.text_params.model_name).to(device)
+        text_encoder.resize_token_embeddings(len(tokenizer))
+        text_encoder.eval()
+    elif config.text_params.context_type == "phonemes":
+        logger.info("Initializing G2P model for phonemes...")
+
+        try:
+            nltk.data.find('taggers/averaged_perceptron_tagger_eng')
+        except LookupError:
+            logger.warning("NLTK data missing. Downloading automatically...")
+            nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+            nltk.download('averaged_perceptron_tagger', quiet=True)
+            nltk.download('cmudict', quiet=True)
+
+        g2p_model = G2p()
 
     logger.info("Initializing Mel-Spectrogram transform from config...")
     mel_transform = get_mel_transform(
@@ -104,31 +119,48 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
                 hop_length=config.mel_params.hop_length
             )
 
-            durations, text_with_silence = map_to_t5_tokens(aligned_seq, tokenizer)
+            # --- Context Processing ---
+            if config.text_params.context_type == "t5":
+                durations, text_with_silence = map_to_t5_tokens(aligned_seq, tokenizer)
 
-            output_dur_path = output_dir / f"{file_id}_dur.pt"
-            torch.save(durations, output_dur_path)
+                output_dur_path = output_dir / f"{file_id}_dur.pt"
+                torch.save(durations, output_dur_path)
 
-            # --- Text Processing ---
-            inputs = tokenizer(text_with_silence, return_tensors="pt", padding=True, truncation=True).to(device)
-            with torch.no_grad():
-                outputs = text_encoder(**inputs)
-                embedding = outputs.last_hidden_state[0].cpu()
+                inputs = tokenizer(text_with_silence, return_tensors="pt", padding=True, truncation=True).to(device)
+                with torch.no_grad():
+                    outputs = text_encoder(**inputs)
+                    embedding = outputs.last_hidden_state[0].cpu()
 
-            # --- Safety Check ---
-            if embedding.shape[0] != durations.shape[0]:
-                logger.warning(f"Shape mismatch for {file_id}: Emb {embedding.shape[0]} vs Dur {durations.shape[0]}. Skipping.")
-                continue
+                # --- Safety Check ---
+                if embedding.shape[0] != durations.shape[0]:
+                    logger.warning(
+                        f"Shape mismatch for {file_id}: Emb {embedding.shape[0]} vs Dur {durations.shape[0]}. Skipping.")
+                    continue
 
-            output_emb_path = output_dir / f"{file_id}_emb.pt"
-            torch.save(embedding, output_emb_path)
+                output_emb_path = output_dir / f"{file_id}_emb.pt"
+                torch.save(embedding, output_emb_path)
 
-            # --- Text Saving ---
-            output_txt_path = output_dir / f"{file_id}.txt"
-            with open(output_txt_path, "w", encoding="utf-8") as f:
-                f.write(text_with_silence)
+                # --- Text Saving ---
+                output_txt_path = output_dir / f"{file_id}.txt"
+                with open(output_txt_path, "w", encoding="utf-8") as f:
+                    f.write(text_with_silence)
 
-            metadata.append([f"{file_id}_mel.pt", f"{file_id}_emb.pt", f"{file_id}_dur.pt", text_with_silence])
+                metadata.append([f"{file_id}_mel.pt", f"{file_id}_emb.pt", f"{file_id}_dur.pt", text_with_silence])
+
+            elif config.text_params.context_type == "phonemes":
+                durations, phoneme_ids, text_with_silence = map_to_phoneme_tokens(aligned_seq, g2p_model)
+                if phoneme_ids.shape[0] != durations.shape[0]:
+                    logger.warning(f"Shape mismatch for {file_id}. Skipping.")
+                    continue
+
+                torch.save(durations, output_dir / f"{file_id}_dur.pt")
+                torch.save(phoneme_ids, output_dir / f"{file_id}_phonemes.pt")
+
+                output_txt_path = output_dir / f"{file_id}.txt"
+                with open(output_txt_path, "w", encoding="utf-8") as f:
+                    f.write(text_with_silence)
+
+                metadata.append([f"{file_id}_mel.pt", f"{file_id}_phonemes.pt", f"{file_id}_dur.pt", text_with_silence])
 
         except Exception as e:
             logger.error(f"Error processing file {flac_path}: {e}")
@@ -137,7 +169,7 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
     csv_path = output_dir / "metadata.csv"
     with open(csv_path, "w", encoding="utf-8", newline="") as csvfile:
         writer = csv.writer(csvfile, delimiter="|")
-        writer.writerow(["mel_file", "embedding_file", "duration_file", "transcription"])
+        writer.writerow(["mel_file", "context_file", "duration_file", "transcription"])
         writer.writerows(metadata)
 
     logger.success(f"Done! Data saved in: {output_dir}")

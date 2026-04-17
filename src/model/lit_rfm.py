@@ -35,14 +35,16 @@ class LitRFM(pl.LightningModule):
         if 'durations' in batch:
             condition_kwargs['durations'] = batch['durations']
 
-        text_emb = batch['embedding']
+        batch_size = batch['mel'].shape[0]
+        if 'embedding' in batch:
+            condition_kwargs['text_emb'] = batch['embedding']
+        elif 'phoneme_ids' in batch:
+            condition_kwargs['phoneme_ids'] = batch['phoneme_ids']
 
         # CFG Dropout
         cfg_drop_mask = None
         if self.config.cfg_prob > 0.0:
-            cfg_drop_mask = torch.rand(text_emb.shape[0], 1, 1, device=self.device) < self.config.cfg_prob
-
-        condition_kwargs["text_emb"] = text_emb
+            cfg_drop_mask = torch.rand(batch_size, 1, 1, device=self.device) < self.config.cfg_prob
         condition_kwargs["cfg_drop_mask"] = cfg_drop_mask
 
         xt, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
@@ -64,13 +66,17 @@ class LitRFM(pl.LightningModule):
         mask_float = mask_bool.to(torch.float32)
 
         condition_kwargs = {
-            "text_emb": batch['embedding'],
             "mel_pad_mask": batch.get('mel_padding_mask'),
             "text_mask": batch.get('text_padding_mask'),
             "cfg_drop_mask": torch.zeros(batch['mel'].shape[0], 1, 1, dtype=torch.bool, device=self.device)
         }
         if 'durations' in batch:
             condition_kwargs['durations'] = batch['durations']
+
+        if 'embedding' in batch:
+            condition_kwargs['text_emb'] = batch['embedding']
+        elif 'phoneme_ids' in batch:
+            condition_kwargs['phoneme_ids'] = batch['phoneme_ids']
 
         xt, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
 

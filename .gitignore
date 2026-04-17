@@ -8,3 +8,4 @@ checkpoints/
 /data/
 /outputs/
 /wandb/
+lightning_logs/
