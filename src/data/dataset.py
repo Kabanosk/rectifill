@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 
 from src.config.config import DataConfig
-from src.data.utils import RandomInpaintingMasker, SemanticMasker, UniversalMasker
+from src.data.utils import UniversalMasker
 
 
 class LibriSpeechCollator:

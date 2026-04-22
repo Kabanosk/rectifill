@@ -8,9 +8,8 @@ from loguru import logger
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.dataset import get_dataloader
-from src.data.utils import (denormalize_mel, mel_to_waveform, normalize_mel,
-                            save_wav)
-from src.model import get_model
+from src.data.utils import denormalize_mel, mel_to_waveform, normalize_mel, save_wav
+from src.model.dit import DiTModel
 from src.utils.rfm import sample_euler
 
 
@@ -29,7 +28,7 @@ def visualize_and_listen(checkpoint_path: str):
     val_loader = get_dataloader(data_config)
     batch = next(iter(val_loader))
 
-    model = get_model(train_config.model_name, train_config.model_params).to(device)
+    model = DiTModel(train_config.model_params).to(device)
 
     logger.info(f"Loading checkpoint from: {checkpoint_path}")
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -56,9 +55,6 @@ def visualize_and_listen(checkpoint_path: str):
         condition_kwargs['text_emb'] = batch['embedding'].to(device)
     elif 'phoneme_ids' in batch:
         condition_kwargs['phoneme_ids'] = batch['phoneme_ids'].to(device)
-
-    if 'durations' in batch:
-        condition_kwargs['durations'] = batch['durations'].to(device)
 
     logger.info("Running ODE solver (Euler)...")
     with torch.no_grad():

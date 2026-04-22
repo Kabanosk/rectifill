@@ -3,10 +3,10 @@ import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
-from src.utils.rfm import prepare_rfm_batch, sample_euler
-from src.evaluation.metrics import calculate_lsd
-from src.data.utils import denormalize_mel, normalize_mel
 from src.config.config import TrainConfig
+from src.data.utils import denormalize_mel, normalize_mel
+from src.evaluation.metrics import calculate_lsd
+from src.utils.rfm import prepare_rfm_batch, sample_euler
 
 
 class LitRFM(pl.LightningModule):
@@ -32,9 +32,6 @@ class LitRFM(pl.LightningModule):
             "mel_pad_mask": batch.get('mel_padding_mask'),
             "text_mask": batch.get('text_padding_mask'),
         }
-        if 'durations' in batch:
-            condition_kwargs['durations'] = batch['durations']
-
         batch_size = batch['mel'].shape[0]
         if 'embedding' in batch:
             condition_kwargs['text_emb'] = batch['embedding']
@@ -70,9 +67,6 @@ class LitRFM(pl.LightningModule):
             "text_mask": batch.get('text_padding_mask'),
             "cfg_drop_mask": torch.zeros(batch['mel'].shape[0], 1, 1, dtype=torch.bool, device=self.device)
         }
-        if 'durations' in batch:
-            condition_kwargs['durations'] = batch['durations']
-
         if 'embedding' in batch:
             condition_kwargs['text_emb'] = batch['embedding']
         elif 'phoneme_ids' in batch:

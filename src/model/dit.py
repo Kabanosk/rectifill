@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from src.config.config import ModelConfig
-from src.model.modules import SinusoidalPositionEmbeddings, ModulatedLayerNorm, PhonemeEncoder
+from src.model.modules import ModulatedLayerNorm, PhonemeEncoder, SinusoidalPositionEmbeddings
 
 
 class DiTBlock(nn.Module):

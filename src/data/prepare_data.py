@@ -10,7 +10,7 @@ from tqdm import tqdm
 from transformers import T5EncoderModel, T5Tokenizer
 
 from src.config.config import DataConfig, MelConfig, TextConfig
-from src.data.alignment import ForcedAligner, map_to_t5_tokens, map_to_phoneme_tokens
+from src.data.alignment import ForcedAligner, map_to_phoneme_tokens, map_to_t5_tokens
 from src.data.utils import get_mel_transform, load_wav
 
 

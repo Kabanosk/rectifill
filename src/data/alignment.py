@@ -1,7 +1,7 @@
 import torch
 import torchaudio
-from transformers import T5Tokenizer
 from loguru import logger
+from transformers import T5Tokenizer
 
 
 class ForcedAligner:

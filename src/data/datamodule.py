@@ -1,9 +1,10 @@
-import lightning.pytorch as pl
-from torch.utils.data import DataLoader
 from typing import Optional
 
+import lightning.pytorch as pl
+from torch.utils.data import DataLoader
+
 from src.config.config import DataConfig
-from src.data.dataset import LibriSpeechDataset, LibriSpeechCollator
+from src.data.dataset import LibriSpeechCollator, LibriSpeechDataset
 
 
 class LibriSpeechDataModule(pl.LightningDataModule):
