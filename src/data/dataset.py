@@ -28,7 +28,7 @@ class LibriSpeechCollator:
         has_phonemes = 'phoneme_ids' in batch[0]
 
         # Extract common features from the batch list
-        mels = [item['mel'] for item in batch]  # List of [1, 128, T]
+        mels = [item['mel'] for item in batch]  # List of [1, mel_bins, T]
         inpainting_masks = [item['inpainting_mask'] for item in batch]  # List of [T]
         durations = [item['durations'] for item in batch]
         texts = [item['text'] for item in batch]
@@ -59,7 +59,7 @@ class LibriSpeechCollator:
             pad_attention_masks.append(padded_att_mask)
 
         # Stack lists into actual batch tensors
-        mels_tensor = torch.stack(padded_mels)  # [B, 1, 128, Max_Time]
+        mels_tensor = torch.stack(padded_mels)  # [B, 1, mel_bins, Max_Time]
         inpainting_masks_tensor = torch.stack(padded_inpainting_masks).unsqueeze(1)  # [B, 1, Max_Time]
         pad_attention_masks_tensor = torch.stack(pad_attention_masks)  # [B, Max_Time]
 
@@ -85,7 +85,7 @@ class LibriSpeechCollator:
         )
 
         output = {
-            "mel": mels_tensor,  # [B, 1, 128, T]
+            "mel": mels_tensor,  # [B, 1, mel_bins, T]
             "inpainting_mask": inpainting_masks_tensor,  # [B, 1, T] - Hole
             "mel_padding_mask": pad_attention_masks_tensor,  # [B, T] - Ignore padding in Attention
             "durations": durations_tensor,  # [B, Seq] - Alignment
