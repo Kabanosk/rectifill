@@ -10,6 +10,7 @@ class EMACallback(Callback):
         super().__init__()
         self.decay = decay
         self.update_every = update_every
+        self.last_step = 0
 
     def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         """
@@ -31,8 +32,10 @@ class EMACallback(Callback):
         :param batch: The current batch.
         :param batch_idx: The current batch index.
         """
-        if trainer.global_step % self.update_every == 0:
+        current_step = trainer.global_step
+        if current_step != self.last_step and trainer.global_step % self.update_every == 0:
             pl_module.ema_model.update(pl_module.model)
+            self.last_step = current_step
 
     def on_save_checkpoint(self, trainer: pl.Trainer, pl_module: pl.LightningModule, checkpoint: dict):
         """Saves the EMA weights into the Lightning checkpoint."""
