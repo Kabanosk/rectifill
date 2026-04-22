@@ -98,22 +98,22 @@ def visualize_and_listen(checkpoint_path: str):
     plt.savefig(plot_path)
     logger.success(f"Plot saved to {plot_path}")
 
-    # --- AUDIO GENERATION (Griffin-Lim) ---
-    logger.info("Converting Mel-spectrograms back to audio using Griffin-Lim...")
+    # --- AUDIO GENERATION (HiFi-GAN) ---
+    logger.info("Converting Mel-spectrograms back to audio using HiFi-GAN...")
 
     sr = data_config.mel_params.sample_rate
 
     # Process original
-    wav_orig = mel_to_waveform(original_np, sr=sr)
-    save_wav(str(output_dir / "original.wav"), torch.tensor(wav_orig).unsqueeze(0), sample_rate=sr)
+    wav_orig = mel_to_waveform(original_np)
+    save_wav(str(output_dir / "original.wav"), wav_orig.unsqueeze(0), sample_rate=sr)
 
     # Process masked (with silence in the hole)
-    wav_masked = mel_to_waveform(masked_np, sr=sr)
-    save_wav(str(output_dir / "masked.wav"), torch.tensor(wav_masked).unsqueeze(0), sample_rate=sr)
+    wav_masked = mel_to_waveform(masked_np)
+    save_wav(str(output_dir / "masked.wav"), wav_masked.unsqueeze(0), sample_rate=sr)
 
     # Process generated
-    wav_gen = mel_to_waveform(generated_np, sr=sr)
-    save_wav(str(output_dir / "inpainted.wav"), torch.tensor(wav_gen).unsqueeze(0), sample_rate=sr)
+    wav_gen = mel_to_waveform(generated_np)
+    save_wav(str(output_dir / "inpainted.wav"), wav_gen.unsqueeze(0), sample_rate=sr)
 
     logger.success(f"Audio files saved to {output_dir}/ directory!")
 

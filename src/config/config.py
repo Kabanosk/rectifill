@@ -9,7 +9,7 @@ class MelConfig:
     sample_rate: int = 16000
     n_fft: int = 1024
     hop_length: int = 512
-    n_mels: int = 128
+    n_mels: int = 80
 
 
 @dataclasses.dataclass
@@ -24,7 +24,7 @@ class TextConfig:
 class DataConfig:
     """Main data configuration for the dataset and dataloaders."""
     data_path: str | pathlib.Path = "data"
-    batch_size: int = 64
+    batch_size: int = 4
     num_workers: int = 4
     shuffle: bool = True
     drop_last: bool = False
@@ -49,13 +49,13 @@ class ModelConfig:
     context_type: Literal["t5", "phonemes"] = "phonemes"
 
     # Architecture dimensions
-    hidden_size: int = 768
-    depth: int = 12
-    num_heads: int = 12
+    hidden_size: int = 384
+    depth: int = 6
+    num_heads: int = 6
     dropout: float = 0.2
 
     # Audio & Text
-    mel_bins: int = 128
+    mel_bins: int = 80
     text_dim: int = 768
     max_seq_len: int = 4000
 
@@ -72,17 +72,17 @@ class TrainConfig:
     device: str = "cuda"
     checkpoint_path: str = "checkpoints/base"
     log_interval: int = 100
-    epochs: int = 50
+    epochs: int = 100
     seed: int = 42
 
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     # for lr scheduler
     eta_min: float = 1e-6
-    warmup_steps: int = 500
+    warmup_steps: int = 1000
 
     weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0
-    accumulation_steps: int = 1  # for gradient accumulation
+    accumulation_steps: int = 32  # for gradient accumulation
 
     validation_metrics_steps: int = 5
 
