@@ -44,9 +44,9 @@ class LitRFM(pl.LightningModule):
             cfg_drop_mask = torch.rand(batch_size, 1, 1, device=self.device) < self.config.cfg_prob
         condition_kwargs["cfg_drop_mask"] = cfg_drop_mask
 
-        xt, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
+        xt, x_context, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
 
-        v_pred = self.model(xt=xt, mask=mask_float, t=t, **condition_kwargs)
+        v_pred = self.model(xt=xt, x_context=x_context, mask=mask_float, t=t, **condition_kwargs)
 
         loss = F.mse_loss(v_pred, target_v, reduction='none')
         masked_loss = loss[mask_bool.expand_as(loss)].mean()
@@ -72,9 +72,9 @@ class LitRFM(pl.LightningModule):
         elif 'phoneme_ids' in batch:
             condition_kwargs['phoneme_ids'] = batch['phoneme_ids']
 
-        xt, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
+        xt, x_context, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
 
-        v_pred = eval_model(xt=xt, mask=mask_float, t=t, **condition_kwargs)
+        v_pred = eval_model(xt=xt, x_context=x_context, mask=mask_float, t=t, **condition_kwargs)
 
         loss = F.mse_loss(v_pred, target_v, reduction='none')
         masked_loss = loss[mask_bool.expand_as(loss)].mean()

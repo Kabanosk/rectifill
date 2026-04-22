@@ -3,7 +3,7 @@ import torch
 
 def prepare_rfm_batch(
     x1: torch.Tensor, mask_bool: torch.Tensor, device: str | torch.device
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Samples time t, generates noise x0, and computes the intermediate state xt
     and target velocity for Rectified Flow Matching.
@@ -13,14 +13,14 @@ def prepare_rfm_batch(
     t_expanded = t.view(-1, 1, 1)
 
     x0 = torch.randn_like(x1)
-    xt_hole = t_expanded * x1 + (1.0 - t_expanded) * x0
+    x_context = torch.where(mask_bool.expand_as(x1), torch.zeros_like(x1), x1)
 
     # Context condition
-    xt = torch.where(mask_bool.expand_as(x1), xt_hole, x1)
+    xt = t_expanded * x1 + (1.0 - t_expanded) * x0
     target_v_hole = x1 - x0
     target_v = torch.where(mask_bool.expand_as(x1), target_v_hole, torch.zeros_like(x1))
 
-    return xt, target_v, t
+    return xt, x_context, target_v, t
 
 
 def sample_euler(
@@ -43,6 +43,7 @@ def sample_euler(
 
     dt = 1.0 / num_steps
     mask_float = mask_bool.to(torch.float32)
+    x_context = torch.where(mask_bool.expand_as(x1_context), torch.zeros_like(x1_context), x1_context)
 
     uncond_kwargs = {}
     if cfg_scale != 1.0:
@@ -60,12 +61,12 @@ def sample_euler(
         x_t = torch.where(mask_bool, x_t, x_t_exact_context)
 
         with torch.no_grad():
-            v_cond = model(xt=x_t, mask=mask_float, t=t, **condition_kwargs)
+            v_cond = model(xt=x_t, x_context=x_context, mask=mask_float, t=t, **condition_kwargs)
 
             if cfg_scale == 1.0:
                 v_pred = v_cond
             else:
-                v_uncond = model(xt=x_t, mask=mask_float, t=t, **uncond_kwargs)
+                v_uncond = model(xt=x_t, x_context=x_context, mask=mask_float, t=t, **uncond_kwargs)
                 v_pred = v_uncond + cfg_scale * (v_cond - v_uncond)
 
         x_t = x_t + v_pred * dt

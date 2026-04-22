@@ -92,7 +92,7 @@ class DiTModel(nn.Module):
             nn.Linear(config.hidden_size * 4, config.hidden_size)
         )
 
-        in_channels = config.mel_bins + 1  # for mask
+        in_channels = (config.mel_bins * 2) + 1  # x_ctx, x_t and mask
         self.input_proj = nn.Conv1d(
             in_channels=in_channels,
             out_channels=config.hidden_size,
@@ -129,11 +129,12 @@ class DiTModel(nn.Module):
         nn.init.zeros_(self.output_proj.weight)
         nn.init.zeros_(self.output_proj.bias)
 
-    def forward(self, xt: torch.Tensor, mask: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, xt: torch.Tensor, x_context: torch.Tensor, mask: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Forward pass predicting the velocity field v = x1 - x0.
 
         :param xt: Noisy mel-spectrogram of shape [Batch, Mel_Bins, Time].
+        :param x_context: Mel-spectrogram with hole [Batch, Mel_Bins, Time].
         :param mask: Inpainting mask of shape (1 indicates missing regions) [Batch, 1, Time].
         :param kwargs: kwargs takes other variables that are not presented in BaseModel class like:
             - t: Diffusion timestep of shape [Batch].
@@ -162,7 +163,7 @@ class DiTModel(nn.Module):
             text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
 
         t_emb = self.time_mlp(t * 1000.0)  # [Batch, Hidden_Size]
-        x = torch.cat([xt, mask], dim=1)  # [Batch, Mel_Bins + 1, Time]
+        x = torch.cat([xt, x_context, mask], dim=1)  # [Batch, 2 * Mel_Bins + 1, Time]
 
         # Project to hidden dimensions
         x = self.input_proj(x)  # [Batch, Hidden_Size, Time]
