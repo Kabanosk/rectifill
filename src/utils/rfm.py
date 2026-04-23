@@ -57,7 +57,7 @@ def sample_euler(
         t = torch.full((batch_size,), t_val, device=device)
 
         # Enforce context
-        x_t_exact_context = t_val * x1_context + (1.0 - t_val) * noise_for_context
+        x_t_exact_context = t_val * x_context + (1.0 - t_val) * noise_for_context
         x_t = torch.where(mask_bool, x_t, x_t_exact_context)
 
         with torch.no_grad():
