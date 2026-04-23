@@ -152,16 +152,25 @@ class DiTModel(nn.Module):
         mel_pad_mask = kwargs.get("mel_pad_mask", None)
         cfg_drop_mask = kwargs.get("cfg_drop_mask", None)
 
+        is_fully_unconditional = cfg_drop_mask is not None and torch.all(cfg_drop_mask)
+
         if self.config.context_type == "phonemes":
-            phoneme_ids = kwargs.get("phoneme_ids")
-            # Convert raw IDs into dense contextualized embeddings via transformer
-            text_emb = self.phoneme_encoder(phoneme_ids, src_key_padding_mask=text_mask)
+            phoneme_ids = kwargs.get("phoneme_ids", torch.tensor([]))
+            if is_fully_unconditional:
+                # Bypass transformer and use pre-learned null embeddings
+                text_emb = self.null_text_embed.expand(phoneme_ids.shape[0], phoneme_ids.shape[1], -1)
+            else:
+                text_emb = self.phoneme_encoder(phoneme_ids, src_key_padding_mask=text_mask)
+                # Handle partial dropping within the batch (during training)
+                if cfg_drop_mask is not None:
+                    null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)
+                    text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
         else:
             text_emb = kwargs.get("text_emb", None)
-
-        if text_emb is not None and cfg_drop_mask is not None:
-            null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)
-            text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
+            # T5 processing branch
+            if text_emb is not None and cfg_drop_mask is not None:
+                null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)
+                text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
 
         t_emb = self.time_mlp(t * 1000.0)  # [Batch, Hidden_Size]
         x = torch.cat([xt, x_context, mask], dim=1)  # [Batch, 2 * Mel_Bins + 1, Time]
