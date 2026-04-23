@@ -124,6 +124,7 @@ class DiTModel(nn.Module):
             ) for _ in range(config.depth)
         ])
 
+        self.final_norm = ModulatedLayerNorm(config.hidden_size, config.hidden_size)
         self.output_proj = nn.Conv1d(in_channels=config.hidden_size, out_channels=config.mel_bins, kernel_size=1)
 
         nn.init.zeros_(self.output_proj.weight)
@@ -176,6 +177,8 @@ class DiTModel(nn.Module):
 
         for block in self.blocks:
             x = block(x, cond=t_emb, text_emb=text_emb, text_mask=text_mask, mel_pad_mask=mel_pad_mask)
+
+        x = self.final_norm(x, t_emb)
 
         x = x.transpose(1, 2)  # [Batch, Hidden_Size, Time]
 
