@@ -1,9 +1,10 @@
-import lightning.pytorch as pl
-from torch.utils.data import DataLoader
 from typing import Optional
 
+import lightning.pytorch as pl
+from torch.utils.data import DataLoader
+
 from src.config.config import DataConfig
-from src.data.dataset import LibriSpeechDataset, LibriSpeechCollator
+from src.data.dataset import LibriSpeechCollator, LibriSpeechDataset
 
 
 class LibriSpeechDataModule(pl.LightningDataModule):
@@ -26,11 +27,13 @@ class LibriSpeechDataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             self.train_dataset = LibriSpeechDataset(
                 data_dir=self.train_config.data_path,
-                max_mel_length=self.train_config.max_mel_length
+                max_mel_length=self.train_config.max_mel_length,
+                context_type=self.train_config.text_params.context_type,
             )
             self.val_dataset = LibriSpeechDataset(
                 data_dir=self.val_config.data_path,
-                max_mel_length=self.val_config.max_mel_length
+                max_mel_length=self.val_config.max_mel_length,
+                context_type=self.val_config.text_params.context_type,
             )
 
     def train_dataloader(self) -> DataLoader:

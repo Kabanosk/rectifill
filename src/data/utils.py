@@ -1,11 +1,13 @@
 import random
 
-import librosa
 import numpy as np
 import torch
 import torchaudio
 import torchaudio.transforms as T
+from loguru import logger
+from transformers import SpeechT5HifiGan
 
+_vocoder: SpeechT5HifiGan | None = None
 
 def load_wav(wav_path, sample_rate=16000) -> torch.Tensor:
     """Load a WAV file and resample to the target sample rate if needed.
@@ -52,21 +54,35 @@ def get_mel_transform(sample_rate=16000, n_mels=128) -> torch.nn.Sequential:
     return torch.nn.Sequential(mel_spectrogram, amplitude_to_db)
 
 
-def mel_to_waveform(mel: np.ndarray, sr: int = 16000, n_fft: int = 1024, hop_length: int = 512) -> np.ndarray:
+def mel_to_waveform(mel: torch.Tensor | np.ndarray) -> torch.Tensor:
     """
-    Converts a log-mel spectrogram back to audio using the Griffin-Lim algorithm.
+    Converts a log-mel spectrogram back to audio using a pre-trained HiFi-GAN vocoder.
 
-    :param mel: Log-mel spectrogram to convert.
-    :param sr: Expected sample rate of the audio (default: 16000).
-    :param n_fft: Number of FFT bins (default: 1024).
-    :param hop_length: Hop length (default: 512).
-    :return: A numpy array representing the audio waveform.
+    :param mel: Log-mel spectrogram of shape [Mel_Bins, Time] or [Batch, Mel_Bins, Time].
+    :return: A 1D tensor representing the audio waveform.
     """
-    mel_power = 10.0 ** (mel / 10.0)
-    wav = librosa.feature.inverse.mel_to_audio(
-        M=mel_power, sr=sr, n_fft=n_fft, hop_length=hop_length
-    )
-    return wav
+    global _vocoder
+
+    if _vocoder is None:
+        logger.info("Loading pre-trained HiFi-GAN vocoder (microsoft/speecht5_hifigan)...")
+        _vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
+        _vocoder.eval()
+
+    if isinstance(mel, np.ndarray):
+        mel = torch.from_numpy(mel)
+
+    if mel.dim() == 2:
+        mel = mel.unsqueeze(0)  # [1, Mel_Bins, Time]
+
+    if mel.shape[1] == 80:
+        mel = mel.transpose(1, 2)
+
+    device = next(_vocoder.parameters()).device
+    mel = mel.to(device)
+    with torch.no_grad():
+        wav = _vocoder(mel)
+
+    return wav.squeeze(0).cpu()
 
 
 def normalize_mel(mel: torch.Tensor, min_db: float = -100.0, max_db: float = 20.0) -> torch.Tensor:

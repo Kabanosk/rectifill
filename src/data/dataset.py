@@ -9,12 +9,12 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 
 from src.config.config import DataConfig
-from src.data.utils import RandomInpaintingMasker, SemanticMasker, UniversalMasker
+from src.data.utils import UniversalMasker
 
 
 class LibriSpeechCollator:
     """
-    Collator for dynamic padding of Mel-spectrograms, text embeddings, and inpainting masks.
+    Collator for dynamic padding of Mel-spectrograms, text embeddings/phonemes, and inpainting masks.
     Ensures all tensors in a batch have the same dimensions by padding with zeros or False.
     """
 
@@ -23,11 +23,14 @@ class LibriSpeechCollator:
         if not batch:
             return None
 
-        # Extract features from the batch list
-        mels = [item['mel'] for item in batch]  # List of [1, 128, T]
+        # Check what context we are working with
+        has_embeddings = 'embedding' in batch[0]
+        has_phonemes = 'phoneme_ids' in batch[0]
+
+        # Extract common features from the batch list
+        mels = [item['mel'] for item in batch]  # List of [1, mel_bins, T]
         inpainting_masks = [item['inpainting_mask'] for item in batch]  # List of [T]
         durations = [item['durations'] for item in batch]
-        embeddings = [item['embedding'] for item in batch]  # List of [Seq_Len, 768]
         texts = [item['text'] for item in batch]
         ids = [item['id'] for item in batch]
 
@@ -56,43 +59,61 @@ class LibriSpeechCollator:
             pad_attention_masks.append(padded_att_mask)
 
         # Stack lists into actual batch tensors
-        mels_tensor = torch.stack(padded_mels)  # [B, 1, 128, Max_Time]
+        mels_tensor = torch.stack(padded_mels)  # [B, 1, mel_bins, Max_Time]
         inpainting_masks_tensor = torch.stack(padded_inpainting_masks).unsqueeze(1)  # [B, 1, Max_Time]
         pad_attention_masks_tensor = torch.stack(pad_attention_masks)  # [B, Max_Time]
 
-        # Pad Text Embeddings and Durations along the sequence length
-        embeddings_tensor = pad_sequence(embeddings, batch_first=True, padding_value=0.0)  # [B, Max_Seq, 768]
+        # Pad Durations along the sequence length
         durations_tensor = pad_sequence(durations, batch_first=True, padding_value=0)  # [B, Max_Seq]
 
+        # Context-specific processing
+        if has_embeddings:
+            embeddings = [item['embedding'] for item in batch]  # List of [Seq_Len, 768]
+            context_tensor = pad_sequence(embeddings, batch_first=True, padding_value=0.0)  # [B, Max_Seq, 768]
+            text_lengths = torch.tensor([emb.shape[0] for emb in embeddings], dtype=torch.long)
+        elif has_phonemes:
+            phonemes = [item['phoneme_ids'] for item in batch]  # List of [Seq_Len]
+            context_tensor = pad_sequence(phonemes, batch_first=True, padding_value=0)  # [B, Max_Seq]
+            text_lengths = torch.tensor([p.shape[0] for p in phonemes], dtype=torch.long)
+        else:
+            raise ValueError("Batch must contain either 'embedding' or 'phoneme_ids'")
+
         # Create text attention masks
-        text_lengths = torch.tensor([emb.shape[0] for emb in embeddings], dtype=torch.long)
-        max_text_len = embeddings_tensor.shape[1]
+        max_text_len = context_tensor.shape[1]
         text_masks_tensor = (
                 torch.arange(max_text_len).expand(len(text_lengths), max_text_len) >= text_lengths.unsqueeze(1)
         )
 
-        return {
-            "mel": mels_tensor,  # [B, 1, 128, T]
+        output = {
+            "mel": mels_tensor,  # [B, 1, mel_bins, T]
             "inpainting_mask": inpainting_masks_tensor,  # [B, 1, T] - Hole
             "mel_padding_mask": pad_attention_masks_tensor,  # [B, T] - Ignore padding in Attention
-            "embedding": embeddings_tensor,  # [B, Seq, 768] - Guidance
             "durations": durations_tensor,  # [B, Seq] - Alignment
             "text_padding_mask": text_masks_tensor,  # [B, Seq]
             "text": texts,
             "id": ids,
         }
 
+        if has_embeddings:
+            output["embedding"] = context_tensor
+        elif has_phonemes:
+            output["phoneme_ids"] = context_tensor
+
+        return output
+
 
 class LibriSpeechDataset(Dataset):
     """
-    PyTorch Dataset for loading precomputed Log-Mel-Spectrograms and T5 embeddings.
+    PyTorch Dataset for loading precomputed Log-Mel-Spectrograms and contexts (T5 embeddings or Phonemes).
     Dynamically generates masks for the inpainting task.
     """
 
-    def __init__(self, data_dir: str | Path, max_mel_length: Optional[int] = None):
+    def __init__(self, data_dir: str | Path, max_mel_length: Optional[int] = None, context_type: str = "t5"):
         self.data_dir = Path(data_dir)
         self.metadata_path = self.data_dir / "metadata.csv"
         self.max_mel_length = max_mel_length
+        self.context_type = context_type
+
         self.mask_generator = UniversalMasker(
             p_tts=0.20,
             p_continuation=0.15,
@@ -106,7 +127,7 @@ class LibriSpeechDataset(Dataset):
             raise FileNotFoundError(f"Metadata file not found at {self.metadata_path}. Run preparation script first.")
 
         self.samples = []
-        logger.info(f"Loading dataset from {self.data_dir}...")
+        logger.info(f"Loading dataset from {self.data_dir} | Context mode: {self.context_type}")
 
         with open(self.metadata_path, "r", encoding="utf-8") as f:
             reader = csv.reader(f, delimiter="|")
@@ -123,13 +144,10 @@ class LibriSpeechDataset(Dataset):
     def __getitem__(self, idx: int) -> Optional[dict]:
         mel_file, emb_file, dur_file, text = self.samples[idx]
         mel_path = self.data_dir / mel_file
-        emb_path = self.data_dir / emb_file
         dur_path = self.data_dir / dur_file
 
         try:
             mel_spec = torch.load(mel_path, weights_only=True)
-            embedding = torch.load(emb_path, weights_only=True)
-
             durations = torch.load(dur_path, weights_only=True)
             if self.max_mel_length and mel_spec.shape[-1] > self.max_mel_length:
                 mel_spec = mel_spec[..., :self.max_mel_length]
@@ -138,14 +156,26 @@ class LibriSpeechDataset(Dataset):
             time_frames = mel_spec.shape[-1]
             inpainting_mask = self.mask_generator(time_frames, durations)
 
-            return {
+            sample_dict = {
                 "mel": mel_spec,
                 "inpainting_mask": inpainting_mask,
-                "embedding": embedding,
                 "durations": durations,
                 "text": text,
                 "id": mel_file.replace("_mel.pt", "")
             }
+
+            if self.context_type == "t5":
+                emb_path = self.data_dir / emb_file
+                embedding = torch.load(emb_path, weights_only=True)
+                sample_dict["embedding"] = embedding
+
+            elif self.context_type == "phonemes":
+                phoneme_path = self.data_dir / emb_file.replace("_emb.pt", "_phonemes.pt")
+                phoneme_ids = torch.load(phoneme_path, weights_only=True)
+                sample_dict["phoneme_ids"] = phoneme_ids
+
+            return sample_dict
+
         except Exception as e:
             logger.error(f"Error loading tensors for {mel_file}: {e}")
             return None
@@ -158,7 +188,7 @@ def get_dataloader(config: DataConfig) -> DataLoader:
     :param config: An instance of DataConfig containing dataset parameters.
     :return: A DataLoader instance ready for training.
     """
-    dataset = LibriSpeechDataset(data_dir=config.data_path, max_mel_length=config.max_mel_length)
+    dataset = LibriSpeechDataset(data_dir=config.data_path, max_mel_length=config.max_mel_length, context_type=config.text_params.context_type)
 
     collator = LibriSpeechCollator()
 

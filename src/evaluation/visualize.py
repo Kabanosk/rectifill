@@ -8,9 +8,8 @@ from loguru import logger
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.dataset import get_dataloader
-from src.data.utils import (denormalize_mel, mel_to_waveform, normalize_mel,
-                            save_wav)
-from src.model import get_model
+from src.data.utils import denormalize_mel, mel_to_waveform, normalize_mel, save_wav
+from src.model.dit import DiTModel
 from src.utils.rfm import sample_euler
 
 
@@ -29,7 +28,7 @@ def visualize_and_listen(checkpoint_path: str):
     val_loader = get_dataloader(data_config)
     batch = next(iter(val_loader))
 
-    model = get_model(train_config.model_name, train_config.model_params).to(device)
+    model = DiTModel(train_config.model_params).to(device)
 
     logger.info(f"Loading checkpoint from: {checkpoint_path}")
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -46,17 +45,16 @@ def visualize_and_listen(checkpoint_path: str):
     mel_raw = batch['mel'].squeeze(1).to(device)  # [1, 128, Time]
     mel_norm = normalize_mel(mel_raw)
     mask_bool = batch['inpainting_mask'].to(device)  # [1, 1, Time]
-    text_emb = batch['embedding'].to(device)
-    text_mask = batch['text_padding_mask'].to(device)
-    mel_pad_mask = batch['mel_padding_mask'].to(device)
 
     condition_kwargs = {
-        "text_emb": text_emb,
-        "text_mask": text_mask,
-        "mel_pad_mask": mel_pad_mask
+        "text_mask": batch['text_padding_mask'].to(device),
+        "mel_pad_mask": batch['mel_padding_mask'].to(device)
     }
-    if 'durations' in batch:
-        condition_kwargs['durations'] = batch['durations'].to(device)
+
+    if 'embedding' in batch:
+        condition_kwargs['text_emb'] = batch['embedding'].to(device)
+    elif 'phoneme_ids' in batch:
+        condition_kwargs['phoneme_ids'] = batch['phoneme_ids'].to(device)
 
     logger.info("Running ODE solver (Euler)...")
     with torch.no_grad():
@@ -100,22 +98,22 @@ def visualize_and_listen(checkpoint_path: str):
     plt.savefig(plot_path)
     logger.success(f"Plot saved to {plot_path}")
 
-    # --- AUDIO GENERATION (Griffin-Lim) ---
-    logger.info("Converting Mel-spectrograms back to audio using Griffin-Lim...")
+    # --- AUDIO GENERATION (HiFi-GAN) ---
+    logger.info("Converting Mel-spectrograms back to audio using HiFi-GAN...")
 
     sr = data_config.mel_params.sample_rate
 
     # Process original
-    wav_orig = mel_to_waveform(original_np, sr=sr)
-    save_wav(str(output_dir / "original.wav"), torch.tensor(wav_orig).unsqueeze(0), sample_rate=sr)
+    wav_orig = mel_to_waveform(original_np)
+    save_wav(str(output_dir / "original.wav"), wav_orig.unsqueeze(0), sample_rate=sr)
 
     # Process masked (with silence in the hole)
-    wav_masked = mel_to_waveform(masked_np, sr=sr)
-    save_wav(str(output_dir / "masked.wav"), torch.tensor(wav_masked).unsqueeze(0), sample_rate=sr)
+    wav_masked = mel_to_waveform(masked_np)
+    save_wav(str(output_dir / "masked.wav"), wav_masked.unsqueeze(0), sample_rate=sr)
 
     # Process generated
-    wav_gen = mel_to_waveform(generated_np, sr=sr)
-    save_wav(str(output_dir / "inpainted.wav"), torch.tensor(wav_gen).unsqueeze(0), sample_rate=sr)
+    wav_gen = mel_to_waveform(generated_np)
+    save_wav(str(output_dir / "inpainted.wav"), wav_gen.unsqueeze(0), sample_rate=sr)
 
     logger.success(f"Audio files saved to {output_dir}/ directory!")
 

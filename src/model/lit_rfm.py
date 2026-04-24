@@ -3,10 +3,10 @@ import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
-from src.utils.rfm import prepare_rfm_batch, sample_euler
-from src.evaluation.metrics import calculate_lsd
-from src.data.utils import denormalize_mel, normalize_mel
 from src.config.config import TrainConfig
+from src.data.utils import denormalize_mel, normalize_mel
+from src.evaluation.metrics import calculate_lsd
+from src.utils.rfm import prepare_rfm_batch, sample_euler
 
 
 class LitRFM(pl.LightningModule):
@@ -32,22 +32,21 @@ class LitRFM(pl.LightningModule):
             "mel_pad_mask": batch.get('mel_padding_mask'),
             "text_mask": batch.get('text_padding_mask'),
         }
-        if 'durations' in batch:
-            condition_kwargs['durations'] = batch['durations']
-
-        text_emb = batch['embedding']
+        batch_size = batch['mel'].shape[0]
+        if 'embedding' in batch:
+            condition_kwargs['text_emb'] = batch['embedding']
+        elif 'phoneme_ids' in batch:
+            condition_kwargs['phoneme_ids'] = batch['phoneme_ids']
 
         # CFG Dropout
         cfg_drop_mask = None
         if self.config.cfg_prob > 0.0:
-            cfg_drop_mask = torch.rand(text_emb.shape[0], 1, 1, device=self.device) < self.config.cfg_prob
-
-        condition_kwargs["text_emb"] = text_emb
+            cfg_drop_mask = torch.rand(batch_size, 1, 1, device=self.device) < self.config.cfg_prob
         condition_kwargs["cfg_drop_mask"] = cfg_drop_mask
 
-        xt, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
+        xt, x_context, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
 
-        v_pred = self.model(xt=xt, mask=mask_float, t=t, **condition_kwargs)
+        v_pred = self.model(xt=xt, x_context=x_context, mask=mask_float, t=t, **condition_kwargs)
 
         loss = F.mse_loss(v_pred, target_v, reduction='none')
         masked_loss = loss[mask_bool.expand_as(loss)].mean()
@@ -64,17 +63,18 @@ class LitRFM(pl.LightningModule):
         mask_float = mask_bool.to(torch.float32)
 
         condition_kwargs = {
-            "text_emb": batch['embedding'],
             "mel_pad_mask": batch.get('mel_padding_mask'),
             "text_mask": batch.get('text_padding_mask'),
             "cfg_drop_mask": torch.zeros(batch['mel'].shape[0], 1, 1, dtype=torch.bool, device=self.device)
         }
-        if 'durations' in batch:
-            condition_kwargs['durations'] = batch['durations']
+        if 'embedding' in batch:
+            condition_kwargs['text_emb'] = batch['embedding']
+        elif 'phoneme_ids' in batch:
+            condition_kwargs['phoneme_ids'] = batch['phoneme_ids']
 
-        xt, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
+        xt, x_context, target_v, t = prepare_rfm_batch(mel, mask_bool, self.device)
 
-        v_pred = eval_model(xt=xt, mask=mask_float, t=t, **condition_kwargs)
+        v_pred = eval_model(xt=xt, x_context=x_context, mask=mask_float, t=t, **condition_kwargs)
 
         loss = F.mse_loss(v_pred, target_v, reduction='none')
         masked_loss = loss[mask_bool.expand_as(loss)].mean()

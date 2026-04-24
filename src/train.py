@@ -2,16 +2,16 @@ import argparse
 import dataclasses
 import math
 from pathlib import Path
-from loguru import logger
 
-import torch
 import lightning.pytorch as pl
+import torch
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, RichProgressBar
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor, RichProgressBar
+from loguru import logger
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.datamodule import LibriSpeechDataModule
-from src.model import get_model
+from src.model.dit import DiTModel
 from src.model.lit_rfm import LitRFM
 from src.utils.callbacks import EMACallback
 
@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     default_data = DataConfig()
 
     # --- Data Paths Arguments ---
-    parser.add_argument("--train_data", type=str, default="data/processed/train-clean-360",
+    parser.add_argument("--train_data", type=str, default="data/processed/train-clean-100",
                         help="Path to the training dataset directory.")
     parser.add_argument("--val_data", type=str, default="data/processed/dev-clean",
                         help="Path to the validation dataset directory.")
@@ -37,8 +37,6 @@ def parse_args() -> argparse.Namespace:
                         help="Maximum sequence length for Mel-spectrograms.")
 
     # --- Training Arguments ---
-    parser.add_argument("--model_name", type=str, default="rfm_dit", choices=["rfm_dit", "aligned_dit"],
-                        help="Model architecture to use (e.g., 'rfm_dit', 'aligned_dit').")
     parser.add_argument("--checkpoint_path", type=str, default=default_train.checkpoint_path,
                         help="Checkpoint directory path.")
     parser.add_argument("--log_interval", type=int, default=default_train.log_interval,
@@ -68,7 +66,6 @@ def main():
     logger.info("Initializing PyTorch Lightning Training Pipeline...")
 
     train_config = TrainConfig(
-        model_name=args.model_name,
         epochs=args.epochs,
         checkpoint_path=args.checkpoint_path,
         learning_rate=args.learning_rate,
@@ -99,7 +96,7 @@ def main():
     datamodule = LibriSpeechDataModule(train_config=train_data_config, val_config=val_data_config)
     datamodule.setup()
 
-    core_model = get_model(train_config.model_name, train_config.model_params)
+    core_model = DiTModel(train_config.model_params)
     steps_per_epoch = math.ceil(len(datamodule.train_dataloader()) / train_config.accumulation_steps)
 
     lit_model = LitRFM(core_model=core_model, config=train_config, steps_per_epoch=steps_per_epoch)
@@ -113,18 +110,18 @@ def main():
     callbacks: list[pl.Callback] = [
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename=f"{train_config.model_name}-{{epoch:02d}}-{{val_epoch_lsd}}",
+            filename=f"{train_config.model_name}-{{val/epoch_lsd}}-{{epoch:02d}}",
             monitor="val/epoch_lsd",
             mode="min",
-            save_top_k=3,
+            save_top_k=2,
             save_last=True
         ),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename=f"{train_config.model_name}-val-loss-{{epoch:02d}}-{{val_epoch_loss:.4f}}",
+            filename=f"{train_config.model_name}-val-loss-{{val/epoch_loss:.4f}}-{{epoch:02d}}",
             monitor="val/epoch_loss",
             mode="min",
-            save_top_k=2,
+            save_top_k=3,
             save_last=False
         ),
         LearningRateMonitor(logging_interval='step'),
