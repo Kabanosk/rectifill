@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from src.config.config import ModelConfig
-from src.model.modules import ModulatedLayerNorm, PhonemeEncoder, SinusoidalPositionEmbeddings
+from src.model.modules import apply_rotary_pos_emb, ModulatedLayerNorm, PhonemeEncoder, SinusoidalPositionEmbeddings, RotaryEmbedding
 
 
 class DiTBlock(nn.Module):
@@ -22,14 +22,21 @@ class DiTBlock(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
 
         self.norm1 = ModulatedLayerNorm(hidden_size, cond_dim)
-        self.attn = nn.MultiheadAttention(embed_dim=hidden_size, num_heads=num_heads, batch_first=True, dropout=dropout)
 
-        self.text_proj = nn.Linear(text_dim, hidden_size)
+        # Self-Attention projections
+        self.qkv_proj = nn.Linear(hidden_size, hidden_size * 3)
+        self.attn_out_proj = nn.Linear(hidden_size, hidden_size)
+
         self.norm2 = nn.LayerNorm(hidden_size)
-        self.cross_attn = nn.MultiheadAttention(embed_dim=hidden_size, num_heads=num_heads, batch_first=True,
-                                                dropout=dropout)
+
+        # Cross-Attention projections
+        self.q_cross_proj = nn.Linear(hidden_size, hidden_size)
+        self.k_cross_proj = nn.Linear(text_dim, hidden_size)
+        self.v_cross_proj = nn.Linear(text_dim, hidden_size)
+        self.cross_out_proj = nn.Linear(hidden_size, hidden_size)
 
         self.norm3 = ModulatedLayerNorm(hidden_size, cond_dim)
         self.ffn = nn.Sequential(
@@ -40,7 +47,7 @@ class DiTBlock(nn.Module):
             nn.Dropout(dropout)
         )
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor, text_emb: torch.Tensor,
+    def forward(self, x: torch.Tensor, cond: torch.Tensor, text_emb: torch.Tensor, rope_cos: torch.Tensor, rope_sin: torch.Tensor,
                 text_mask: torch.Tensor = None, mel_pad_mask: torch.Tensor = None) -> torch.Tensor:
         """
         Processes the input through self-attention, cross-attention, and FFN.
@@ -48,21 +55,56 @@ class DiTBlock(nn.Module):
         :param x: Audio patches tensor of shape [Batch, Seq_Len, Hidden_Size].
         :param cond: Timestep condition tensor of shape [Batch, Cond_Dim].
         :param text_emb: Text embeddings tensor of shape [Batch, Text_Seq_Len, Text_Dim].
-        :param text_mask: Optional boolean mask for text embeddings.
-        :param mel_pad_mask: Optional boolean mask for mel-spectrogram padding.
+        :param rope_cos: Cosine component of Rotary Positional Embeddings.
+        :param rope_sin: Sine component of Rotary Positional Embeddings.
+        :param text_mask: Optional boolean mask for text embeddings. True means padding.
+        :param mel_pad_mask: Optional boolean mask for mel-spectrogram padding. True means padding.
 
         :return: Processed tensor of shape [Batch, Seq_Len, Hidden_Size].
         """
         # --- Self Attention ---
         h = self.norm1(x, cond)
-        attn_out, _ = self.attn(query=h, key=h, value=h, key_padding_mask=mel_pad_mask)
-        x = x + attn_out
+        B, L, C = h.shape
+
+        qkv = self.qkv_proj(h).reshape(B, L, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # [Batch, Heads, Seq_Len, HeadDim]
+
+        # Apply Rotary Positional Embeddings to Q and K
+        q = apply_rotary_pos_emb(q, rope_cos, rope_sin)
+        k = apply_rotary_pos_emb(k, rope_cos, rope_sin)
+
+        attn_mask = None
+        if mel_pad_mask is not None:
+            attn_mask = ~mel_pad_mask.unsqueeze(1).unsqueeze(2)  # [Batch, 1, 1, Seq_Len]
+
+        attn_out = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=attn_mask,
+            dropout_p=0.1 if self.training else 0.0
+        )
+
+        attn_out = attn_out.transpose(1, 2).reshape(B, L, C)
+        x = x + self.attn_out_proj(attn_out)
 
         # --- Cross Attention ---
-        text_emb_proj = self.text_proj(text_emb)
         h = self.norm2(x)
-        cross_out, _ = self.cross_attn(query=h, key=text_emb_proj, value=text_emb_proj, key_padding_mask=text_mask)
-        x = x + cross_out
+
+        q_cross = self.q_cross_proj(h).reshape(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        k_cross = self.k_cross_proj(text_emb).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        v_cross = self.v_cross_proj(text_emb).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
+
+        cross_mask = None
+        if text_mask is not None:
+            cross_mask = ~text_mask.unsqueeze(1).unsqueeze(2)  # [Batch, 1, 1, Text_Seq_Len]
+
+        cross_out = torch.nn.functional.scaled_dot_product_attention(
+            q_cross, k_cross, v_cross,
+            attn_mask=cross_mask,
+            dropout_p=0.1 if self.training else 0.0
+        )
+
+        cross_out = cross_out.transpose(1, 2).reshape(B, L, C)
+        x = x + self.cross_out_proj(cross_out)
 
         # --- Feed Forward ---
         h = self.norm3(x, cond)
@@ -92,7 +134,8 @@ class DiTModel(nn.Module):
             nn.Linear(config.hidden_size * 4, config.hidden_size)
         )
 
-        in_channels = (config.mel_bins * 2) + 1  # x_ctx, x_t and mask
+        # Channel-wise concatenation: xt (noise) + x_context (clean) + mask
+        in_channels = (config.mel_bins * 2) + 1
         self.input_proj = nn.Conv1d(
             in_channels=in_channels,
             out_channels=config.hidden_size,
@@ -108,8 +151,8 @@ class DiTModel(nn.Module):
                 num_heads=config.phoneme_heads,
             )
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, config.max_seq_len, config.hidden_size))
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        # Rotary Positional Embeddings (RoPE) replacing absolute positional embeddings
+        self.rope = RotaryEmbedding(config.hidden_size // config.num_heads)
 
         self.input_dropout = nn.Dropout(config.dropout)
         self.null_text_embed = nn.Parameter(torch.randn(1, 1, config.text_dim) * 0.02)
@@ -155,9 +198,10 @@ class DiTModel(nn.Module):
         is_fully_unconditional = cfg_drop_mask is not None and torch.all(cfg_drop_mask)
 
         if self.config.context_type == "phonemes":
-            phoneme_ids = kwargs.get("phoneme_ids", torch.tensor([]))
+            phoneme_ids = kwargs.get("phoneme_ids", torch.tensor([], device=xt.device))
+
             if is_fully_unconditional:
-                # Bypass transformer and use pre-learned null embeddings
+                # Bypass the heavy transformer encoder and use pre-learned null embeddings
                 text_emb = self.null_text_embed.expand(phoneme_ids.shape[0], phoneme_ids.shape[1], -1)
             else:
                 text_emb = self.phoneme_encoder(phoneme_ids, src_key_padding_mask=text_mask)
@@ -166,8 +210,8 @@ class DiTModel(nn.Module):
                     null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)
                     text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
         else:
-            text_emb = kwargs.get("text_emb", None)
             # T5 processing branch
+            text_emb = kwargs.get("text_emb", None)
             if text_emb is not None and cfg_drop_mask is not None:
                 null_emb = self.null_text_embed.expand(text_emb.shape[0], text_emb.shape[1], -1)
                 text_emb = torch.where(cfg_drop_mask, null_emb, text_emb)
@@ -175,17 +219,18 @@ class DiTModel(nn.Module):
         t_emb = self.time_mlp(t * 1000.0)  # [Batch, Hidden_Size]
         x = torch.cat([xt, x_context, mask], dim=1)  # [Batch, 2 * Mel_Bins + 1, Time]
 
-        # Project to hidden dimensions
         x = self.input_proj(x)  # [Batch, Hidden_Size, Time]
         x = x.transpose(1, 2)  # [Batch, Time, Hidden_Size]
 
-        # Add positional embeddings
-        seq_len = x.shape[1]
-        x = x + self.pos_embed[:, :seq_len, :]
         x = self.input_dropout(x)
 
+        seq_len = x.shape[1]
+        rope_cos, rope_sin = self.rope(seq_len, x.device)
+
         for block in self.blocks:
-            x = block(x, cond=t_emb, text_emb=text_emb, text_mask=text_mask, mel_pad_mask=mel_pad_mask)
+            x = block(x, cond=t_emb, text_emb=text_emb,
+                      rope_cos=rope_cos, rope_sin=rope_sin,
+                      text_mask=text_mask, mel_pad_mask=mel_pad_mask)
 
         x = self.final_norm(x, t_emb)
 
