@@ -129,6 +129,8 @@ def map_to_t5_tokens(aligned_sequence: list[dict], tokenizer: T5Tokenizer) -> tu
         num_tokens = len(tokens)
 
         if num_tokens == 0:
+            durations.append(total_frames)
+            final_text_parts.append("<SIL>")
             continue
 
         frames_per_token = total_frames // num_tokens
@@ -192,6 +194,9 @@ def map_to_phoneme_tokens(aligned_sequence: list[dict], g2p_model) -> tuple[torc
 
         num_phonemes = len(ph_list)
         if num_phonemes == 0:
+            durations.append(total_frames)
+            phoneme_ids.append(PHONEME_VOCAB["<SIL>"])
+            final_text_parts.append("<SIL>")
             continue
 
         frames_per_ph = total_frames // num_phonemes

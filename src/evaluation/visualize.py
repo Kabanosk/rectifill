@@ -37,7 +37,9 @@ def visualize_and_listen(checkpoint_path: str):
         model.load_state_dict(ckpt['ema_model_state_dict'])
         logger.info("Loaded EMA weights.")
     else:
-        model.load_state_dict(ckpt['model_state_dict'])
+        state_dict = ckpt['state_dict']
+        clean_state_dict = {k.replace('model.', ''): v for k, v in state_dict.items() if k.startswith('model.')}
+        model.load_state_dict(clean_state_dict)
         logger.info("Loaded standard model weights.")
 
     model.eval()

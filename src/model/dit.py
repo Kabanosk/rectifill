@@ -220,6 +220,9 @@ class DiTModel(nn.Module):
         t_emb = self.time_mlp(t * 1000.0)  # [Batch, Hidden_Size]
         x = torch.cat([xt, x_context, mask], dim=1)  # [Batch, 2 * Mel_Bins + 1, Time]
 
+        if mel_pad_mask is not None:
+            x = x.masked_fill(mel_pad_mask.unsqueeze(1), 0.0)
+
         x = self.input_proj(x)  # [Batch, Hidden_Size, Time]
         x = x.transpose(1, 2)  # [Batch, Time, Hidden_Size]
 
