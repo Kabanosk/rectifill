@@ -149,8 +149,6 @@ class LibriSpeechDataset(Dataset):
         try:
             mel_spec = torch.load(mel_path, weights_only=True)
             durations = torch.load(dur_path, weights_only=True)
-            if self.max_mel_length and mel_spec.shape[-1] > self.max_mel_length:
-                mel_spec = mel_spec[..., :self.max_mel_length]
 
             # Generate the semantic inpainting mask based on durations
             time_frames = mel_spec.shape[-1]

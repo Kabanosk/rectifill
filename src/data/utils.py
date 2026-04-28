@@ -1,3 +1,4 @@
+import math
 import random
 
 import numpy as np
@@ -32,14 +33,14 @@ def save_wav(wav_path, wav, sample_rate=16000) -> None:
     torchaudio.save(wav_path, wav, sample_rate)
 
 
-def get_mel_transform(sample_rate=16000, n_mels=128) -> torch.nn.Sequential:
+def get_mel_transform(sample_rate=16000, n_mels=80) -> torch.nn.Sequential:
     """Creates a transform to convert audio waveforms into Log-Mel-Spectrograms.
 
     Uses AmplitudeToDB to compress the dynamic range, which is crucial for
     generative models and stable training.
 
     :param sample_rate: Expected sample rate of the audio (default: 16000).
-    :param n_mels: Number of mel filterbanks (default: 128).
+    :param n_mels: Number of mel filterbanks (default: 80).
     :return: A Sequential PyTorch module applying MelSpectrogram then AmplitudeToDB.
     """
     mel_spectrogram = T.MelSpectrogram(
@@ -52,6 +53,37 @@ def get_mel_transform(sample_rate=16000, n_mels=128) -> torch.nn.Sequential:
     amplitude_to_db = T.AmplitudeToDB(stype="power", top_db=100.0)
 
     return torch.nn.Sequential(mel_spectrogram, amplitude_to_db)
+
+
+def prepare_mel_for_hifigan(mel_db: torch.Tensor | np.ndarray) -> torch.Tensor:
+    """
+    Prepares a decibel-scaled mel-spectrogram for the SpeechT5 HiFi-GAN vocoder.
+
+    This function converts the input from a decibel (dB) scale to a natural
+    logarithm (ln) scale, clamps the lower bound to avoid audio artifacts
+    from deep silence, and ensures the tensor matches the expected shape
+    [Batch, Time, 80].
+
+    :param mel_db: Input mel-spectrogram tensor in decibels. Expected shape is either [Mel_Bins, Time] or [Batch, Mel_Bins, Time].
+    :return: A formatted mel-spectrogram tensor of shape [Batch, Time, 80] ready for HiFi-GAN.
+    :raises ValueError: If the number of mel-bins is not exactly 80.
+    """
+    if isinstance(mel_db, np.ndarray):
+        mel_db: torch.Tensor = torch.from_numpy(mel_db)
+
+    mel_ln = mel_db * (math.log(10) / 10.0)
+    mel_ln = torch.clamp(mel_ln, min=-11.51)
+
+    if mel_ln.dim() == 2:
+        mel_ln = mel_ln.unsqueeze(0)
+
+    if mel_ln.shape[1] == 80:
+        mel_ln = mel_ln.transpose(1, 2)
+    elif mel_ln.shape[2] != 80:
+        raise ValueError(f"Dimensionality error! SpeechT5 HiFi-GAN requires exactly 80 mel-bins. "
+                         f"Your tensor has shape: {mel_ln.shape}. Make sure n_mels=80.")
+
+    return mel_ln
 
 
 def mel_to_waveform(mel: torch.Tensor | np.ndarray) -> torch.Tensor:
@@ -68,14 +100,7 @@ def mel_to_waveform(mel: torch.Tensor | np.ndarray) -> torch.Tensor:
         _vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
         _vocoder.eval()
 
-    if isinstance(mel, np.ndarray):
-        mel = torch.from_numpy(mel)
-
-    if mel.dim() == 2:
-        mel = mel.unsqueeze(0)  # [1, Mel_Bins, Time]
-
-    if mel.shape[1] == 80:
-        mel = mel.transpose(1, 2)
+    mel = prepare_mel_for_hifigan(mel)
 
     device = next(_vocoder.parameters()).device
     mel = mel.to(device)

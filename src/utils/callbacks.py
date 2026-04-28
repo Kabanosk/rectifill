@@ -20,6 +20,11 @@ class EMACallback(Callback):
         :param pl_module: The current pl module.
         """
         ema_model: ModelEMA = ModelEMA(pl_module.model, decay=self.decay)
+
+        if hasattr(self, "_ema_state_dict_to_load"):
+            ema_model.ema_model.load_state_dict(self._ema_state_dict_to_load)
+            del self._ema_state_dict_to_load
+
         pl_module.ema_model = ema_model
 
     def on_train_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, outputs, batch, batch_idx):
