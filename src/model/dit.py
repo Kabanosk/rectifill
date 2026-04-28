@@ -23,6 +23,7 @@ class DiTBlock(nn.Module):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
+        self.dropout = dropout
 
         self.norm1 = ModulatedLayerNorm(hidden_size, cond_dim)
 
@@ -30,7 +31,7 @@ class DiTBlock(nn.Module):
         self.qkv_proj = nn.Linear(hidden_size, hidden_size * 3)
         self.attn_out_proj = nn.Linear(hidden_size, hidden_size)
 
-        self.norm2 = nn.LayerNorm(hidden_size)
+        self.norm2 = ModulatedLayerNorm(hidden_size, cond_dim)
 
         # Cross-Attention projections
         self.q_cross_proj = nn.Linear(hidden_size, hidden_size)
@@ -80,14 +81,14 @@ class DiTBlock(nn.Module):
         attn_out = torch.nn.functional.scaled_dot_product_attention(
             q, k, v,
             attn_mask=attn_mask,
-            dropout_p=0.1 if self.training else 0.0
+            dropout_p=self.dropout if self.training else 0.0
         )
 
         attn_out = attn_out.transpose(1, 2).reshape(B, L, C)
         x = x + self.attn_out_proj(attn_out)
 
         # --- Cross Attention ---
-        h = self.norm2(x)
+        h = self.norm2(x, cond)
 
         q_cross = self.q_cross_proj(h).reshape(B, L, self.num_heads, self.head_dim).transpose(1, 2)
         k_cross = self.k_cross_proj(text_emb).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
@@ -100,7 +101,7 @@ class DiTBlock(nn.Module):
         cross_out = torch.nn.functional.scaled_dot_product_attention(
             q_cross, k_cross, v_cross,
             attn_mask=cross_mask,
-            dropout_p=0.1 if self.training else 0.0
+            dropout_p=self.dropout if self.training else 0.0
         )
 
         cross_out = cross_out.transpose(1, 2).reshape(B, L, C)

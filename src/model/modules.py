@@ -153,6 +153,8 @@ class PhonemeEncoder(nn.Module):
             for _ in range(num_layers)
         ])
 
+        self.final_norm = nn.LayerNorm(hidden_dim)
+
     def forward(self, phoneme_ids: torch.Tensor, src_key_padding_mask: torch.Tensor) -> torch.Tensor:
         """
         :param phoneme_ids: [Batch, Seq_Len] of integers
@@ -167,4 +169,5 @@ class PhonemeEncoder(nn.Module):
         for layer in self.layers:
             x = layer(x, cos, sin, mask=src_key_padding_mask)
 
+        x = self.final_norm(x)
         return x
