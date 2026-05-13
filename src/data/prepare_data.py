@@ -84,7 +84,7 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
     mel_transform = get_mel_transform(
         sample_rate=config.mel_params.sample_rate,
         n_mels=config.mel_params.n_mels
-    ).to(device)
+    )
 
     logger.info("Initializing Forced Aligner...")
     aligner = ForcedAligner(device=device)
@@ -103,11 +103,12 @@ def process_audio_and_text(source_dir: Path, output_dir: Path, config: DataConfi
 
         try:
             # --- Audio Processing ---
-            waveform = load_wav(flac_path, config.mel_params.sample_rate).to(device)
+            waveform = load_wav(flac_path, config.mel_params.sample_rate)
 
             with torch.no_grad():
                 mel_spec = mel_transform(waveform).cpu()
 
+            waveform = waveform.to(device)
             output_mel_path = output_dir / f"{file_id}_mel.pt"
             torch.save(mel_spec, output_mel_path)
 

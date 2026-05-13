@@ -71,7 +71,7 @@ def visualize_and_listen(checkpoint_path: str):
 
     generated_mel_db = denormalize_mel(generated_mel_norm)
     masked_mel_db = mel_raw.clone()
-    masked_mel_db = torch.where(mask_bool.expand_as(masked_mel_db), torch.tensor(-100.0, device=device), masked_mel_db)
+    masked_mel_db = torch.where(mask_bool.expand_as(masked_mel_db), torch.tensor(-23.0, device=device), masked_mel_db)
     original_np = mel_raw[0].cpu().numpy()
     masked_np = masked_mel_db[0].cpu().numpy()
     generated_np = generated_mel_db[0].cpu().numpy()

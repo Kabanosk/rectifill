@@ -1,4 +1,5 @@
 import torch
+from tqdm import tqdm
 
 
 def prepare_rfm_batch(
@@ -52,7 +53,7 @@ def sample_euler(
         uncond_kwargs["cfg_drop_mask"] = torch.ones(batch_size, 1, 1, dtype=torch.bool, device=device)
 
     condition_kwargs["cfg_drop_mask"] = torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
-    for i in range(num_steps):
+    for i in tqdm(range(num_steps), desc="Sampling"):
         t_val = i / num_steps
         t = torch.full((batch_size,), t_val, device=device)
 

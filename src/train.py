@@ -9,7 +9,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, Ri
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
 
-from src.config.config import DataConfig, TrainConfig
+from src.config.config import DataConfig, MelConfig, ModelConfig, TextConfig, TrainConfig, WandbConfig
 from src.data.datamodule import LibriSpeechDataModule
 from src.model.dit import DiTModel
 from src.model.lit_rfm import LitRFM
@@ -64,6 +64,14 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     logger.info("Initializing PyTorch Lightning Training Pipeline...")
+    torch.serialization.add_safe_globals([
+        TrainConfig,
+        DataConfig,
+        ModelConfig,
+        WandbConfig,
+        MelConfig,
+        TextConfig
+    ])
 
     train_config = TrainConfig(
         epochs=args.epochs,
@@ -99,7 +107,8 @@ def main():
     core_model = DiTModel(train_config.model_params)
     steps_per_epoch = math.ceil(len(datamodule.train_dataloader()) / train_config.accumulation_steps)
 
-    lit_model = LitRFM(core_model=core_model, config=train_config, steps_per_epoch=steps_per_epoch)
+    num_devices: int = train_config.devices if isinstance(train_config.devices, int) else 1
+    lit_model = LitRFM(core_model=core_model, config=train_config, steps_per_epoch=steps_per_epoch // num_devices)
 
     total_params = sum(p.numel() for p in core_model.parameters())
     logger.info(f"Model architecture [{train_config.model_name}] initialized. Total Params: {total_params:,}")

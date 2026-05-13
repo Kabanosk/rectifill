@@ -1,14 +1,14 @@
-import math
 import random
 
 import numpy as np
 import torch
 import torchaudio
+import soundfile as sf
 import torchaudio.transforms as T
 from loguru import logger
-from transformers import SpeechT5HifiGan
 
-_vocoder: SpeechT5HifiGan | None = None
+_vocoder = None
+
 
 def load_wav(wav_path, sample_rate=16000) -> torch.Tensor:
     """Load a WAV file and resample to the target sample rate if needed.
@@ -17,7 +17,13 @@ def load_wav(wav_path, sample_rate=16000) -> torch.Tensor:
     :param sample_rate: Target sample rate (default: 16000).
     :return: A tensor containing the audio data, resampled to the target sample rate.
     """
-    wav, sr = torchaudio.load(wav_path, backend="soundfile")
+    wav_np, sr = sf.read(str(wav_path), dtype='float32')
+    wav = torch.from_numpy(wav_np)
+    if wav.ndim == 1:
+        wav = wav.unsqueeze(0)
+    else:
+        wav = wav.t()
+
     if sr != sample_rate:
         wav = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)(wav)
     return wav
@@ -30,65 +36,68 @@ def save_wav(wav_path, wav, sample_rate=16000) -> None:
     :param wav: A tensor containing the audio data to save.
     :param sample_rate: Sample rate for the output WAV file (default: 16000).
     """
-    torchaudio.save(wav_path, wav, sample_rate)
+    sf.write(str(wav_path), wav.cpu().numpy().T, sample_rate)
 
 
-def get_mel_transform(sample_rate=16000, n_mels=80) -> torch.nn.Sequential:
-    """Creates a transform to convert audio waveforms into Log-Mel-Spectrograms.
+def get_mel_transform(sample_rate: int = 16000, n_mels: int = 80) -> torch.nn.Module:
+    """Creates a transform to convert audio waveforms into Log-Mel-Spectrograms
+    compatible with the SpeechBrain HiFi-GAN vocoder trained on LibriTTS at 16kHz.
 
-    Uses AmplitudeToDB to compress the dynamic range, which is crucial for
-    generative models and stable training.
+    Uses natural logarithm (ln) scaling with slaney norm and mel scale,
+    matching the speechbrain/tts-hifigan-libritts-16kHz preprocessing exactly.
 
     :param sample_rate: Expected sample rate of the audio (default: 16000).
     :param n_mels: Number of mel filterbanks (default: 80).
-    :return: A Sequential PyTorch module applying MelSpectrogram then AmplitudeToDB.
+    :return: A callable applying MelSpectrogram then log-scaling.
     """
-    mel_spectrogram = T.MelSpectrogram(
+    mel = T.MelSpectrogram(
         sample_rate=sample_rate,
         n_fft=1024,
-        hop_length=512,
+        hop_length=256,
+        win_length=1024,
         n_mels=n_mels,
-        normalized=True
+        f_min=0.0,
+        f_max=8000.0,
+        norm="slaney",
+        mel_scale="slaney",
+        normalized=False,
     )
-    amplitude_to_db = T.AmplitudeToDB(stype="power", top_db=100.0)
-
-    return torch.nn.Sequential(mel_spectrogram, amplitude_to_db)
+    return lambda wav: torch.log(torch.clamp(mel(wav), min=1e-10))
 
 
-def prepare_mel_for_hifigan(mel_db: torch.Tensor | np.ndarray) -> torch.Tensor:
+def prepare_mel_for_hifigan(mel_ln: torch.Tensor | np.ndarray) -> torch.Tensor:
     """
-    Prepares a decibel-scaled mel-spectrogram for the SpeechT5 HiFi-GAN vocoder.
+    Prepares a log-mel spectrogram for the SpeechBrain HiFi-GAN vocoder.
 
-    This function converts the input from a decibel (dB) scale to a natural
-    logarithm (ln) scale, clamps the lower bound to avoid audio artifacts
-    from deep silence, and ensures the tensor matches the expected shape
-    [Batch, Time, 80].
+    Since get_mel_transform() already produces output in natural log (ln) scale
+    matching the vocoder's preprocessing, this function only handles shape
+    formatting to the expected [Batch, Mel_Bins, Time] layout used by SpeechBrain.
 
-    :param mel_db: Input mel-spectrogram tensor in decibels. Expected shape is either [Mel_Bins, Time] or [Batch, Mel_Bins, Time].
-    :return: A formatted mel-spectrogram tensor of shape [Batch, Time, 80] ready for HiFi-GAN.
+    :param mel_ln: Input log-mel spectrogram in ln scale. Expected shape is either
+        [Mel_Bins, Time] or [Batch, Mel_Bins, Time].
+    :return: A formatted mel spectrogram tensor of shape [Batch, Mel_Bins, Time]
+        ready for HiFi-GAN.
     :raises ValueError: If the number of mel-bins is not exactly 80.
     """
-    if isinstance(mel_db, np.ndarray):
-        mel_db: torch.Tensor = torch.from_numpy(mel_db)
-
-    mel_ln = mel_db * (math.log(10) / 10.0)
-    mel_ln = torch.clamp(mel_ln, min=-11.51)
+    if isinstance(mel_ln, np.ndarray):
+        mel_ln = torch.from_numpy(mel_ln)
 
     if mel_ln.dim() == 2:
         mel_ln = mel_ln.unsqueeze(0)
 
-    if mel_ln.shape[1] == 80:
-        mel_ln = mel_ln.transpose(1, 2)
-    elif mel_ln.shape[2] != 80:
-        raise ValueError(f"Dimensionality error! SpeechT5 HiFi-GAN requires exactly 80 mel-bins. "
-                         f"Your tensor has shape: {mel_ln.shape}. Make sure n_mels=80.")
+    if mel_ln.shape[1] != 80:
+        raise ValueError(
+            f"Dimensionality error! HiFi-GAN requires exactly 80 mel-bins. "
+            f"Your tensor has shape: {mel_ln.shape}. Make sure n_mels=80."
+        )
 
     return mel_ln
 
 
 def mel_to_waveform(mel: torch.Tensor | np.ndarray) -> torch.Tensor:
     """
-    Converts a log-mel spectrogram back to audio using a pre-trained HiFi-GAN vocoder.
+    Converts a log-mel spectrogram back to audio using the SpeechBrain
+    HiFi-GAN vocoder trained on LibriTTS at 16kHz.
 
     :param mel: Log-mel spectrogram of shape [Mel_Bins, Time] or [Batch, Mel_Bins, Time].
     :return: A 1D tensor representing the audio waveform.
@@ -96,45 +105,47 @@ def mel_to_waveform(mel: torch.Tensor | np.ndarray) -> torch.Tensor:
     global _vocoder
 
     if _vocoder is None:
-        logger.info("Loading pre-trained HiFi-GAN vocoder (microsoft/speecht5_hifigan)...")
-        _vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
-        _vocoder.eval()
+        logger.info("Loading pre-trained HiFi-GAN vocoder (speechbrain/tts-hifigan-libritts-16kHz)...")
+        from speechbrain.inference.vocoders import HIFIGAN
+        _vocoder = HIFIGAN.from_hparams(source="speechbrain/tts-hifigan-libritts-16kHz",
+                                        savedir="pretrained_models/hifigan_libritts")
 
     mel = prepare_mel_for_hifigan(mel)
 
-    device = next(_vocoder.parameters()).device
-    mel = mel.to(device)
     with torch.no_grad():
-        wav = _vocoder(mel)
+        wav = _vocoder.decode_batch(mel)
 
-    return wav.squeeze(0).cpu()
+    return wav.squeeze(0).squeeze(0).cpu()
 
 
-def normalize_mel(mel: torch.Tensor, min_db: float = -100.0, max_db: float = 20.0) -> torch.Tensor:
+def normalize_mel(mel: torch.Tensor, min_val: float = -11.51, max_val: float = 2.0) -> torch.Tensor:
     """
-    Scales Mel-spectrogram values from the [min_db, max_db] range to [-1, 1].
+    Scales log-mel spectrogram values from the [min_val, max_val] range to [-1, 1].
     Ideal for diffusion models and Flow Matching.
 
-    :param mel: Mel-spectrogram tensor in decibels (dB).
-    :param min_db: Minimum expected dB value (default: -100.0).
-    :param max_db: Maximum expected dB value (default: 20.0).
-    :return: Normalized Mel-spectrogram tensor in the range [-1, 1].
+    The default range [-11.51, 2.0] matches the natural log scale produced by
+    get_mel_transform(), where -11.51 ≈ log(1e-5) and 2.0 is a safe upper bound.
+
+    :param mel: Log-mel spectrogram tensor (ln scale).
+    :param min_val: Minimum expected ln value (default: -11.51).
+    :param max_val: Maximum expected ln value (default: 2.0).
+    :return: Normalized mel spectrogram tensor in the range [-1, 1].
     """
-    mel = torch.clamp(mel, min=min_db, max=max_db)
-    return ((mel - min_db) / (max_db - min_db)) * 2.0 - 1.0
+    mel = torch.clamp(mel, min=min_val, max=max_val)
+    return ((mel - min_val) / (max_val - min_val)) * 2.0 - 1.0
 
 
-def denormalize_mel(mel_norm: torch.Tensor, min_db: float = -100.0, max_db: float = 20.0) -> torch.Tensor:
+def denormalize_mel(mel_norm: torch.Tensor, min_val: float = -11.51, max_val: float = 2.0) -> torch.Tensor:
     """
-    Reverts the [-1, 1] scaling back to the original decibel (dB) scale.
+    Reverts the [-1, 1] scaling back to the original natural logarithm (ln) scale.
 
-    :param mel_norm: Normalized Mel-spectrogram tensor in the range [-1, 1].
-    :param min_db: Minimum expected dB value (default: -100.0).
-    :param max_db: Maximum expected dB value (default: 20.0).
-    :return: Denormalized Mel-spectrogram tensor in decibels (dB).
+    :param mel_norm: Normalized mel spectrogram tensor in the range [-1, 1].
+    :param min_val: Minimum expected ln value (default: -11.51).
+    :param max_val: Maximum expected ln value (default: 2.0).
+    :return: Denormalized mel spectrogram tensor in ln scale.
     """
     mel_01 = (mel_norm + 1.0) / 2.0
-    return mel_01 * (max_db - min_db) + min_db
+    return mel_01 * (max_val - min_val) + min_val
 
 
 class RandomInpaintingMasker:
