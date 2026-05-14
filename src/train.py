@@ -51,6 +51,8 @@ def parse_args() -> argparse.Namespace:
                         help="Max norm for gradient clipping.")
     parser.add_argument("--seed", type=int, default=default_train.seed,
                         help="Random seed for reproducibility.")
+    parser.add_argument("--gradient_checkpointing", action="store_true",
+                        help="Enable gradient checkpointing to save VRAM")
 
     # --- Lightning Specific Args ---
     parser.add_argument("--devices", type=int, default=default_train.devices, help="Number of GPUs to use")
@@ -79,6 +81,7 @@ def main():
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         gradient_clip_val=args.gradient_clip_val,
+        gradient_checkpointing=args.gradient_checkpointing,
         seed=args.seed,
         log_interval=args.log_interval,
         devices=args.devices,
@@ -105,6 +108,10 @@ def main():
     datamodule.setup()
 
     core_model = DiTModel(train_config.model_params)
+    core_model.gradient_checkpointing = train_config.gradient_checkpointing
+    if train_config.gradient_checkpointing:
+        logger.info("Gradient checkpointing enabled.")
+
     steps_per_epoch = math.ceil(len(datamodule.train_dataloader()) / train_config.accumulation_steps)
 
     num_devices: int = train_config.devices if isinstance(train_config.devices, int) else 1

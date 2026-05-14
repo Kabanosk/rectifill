@@ -85,6 +85,7 @@ class TrainConfig:
     weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0
     accumulation_steps: int = 4  # for gradient accumulation
+    gradient_checkpointing: bool = False
 
     validation_metrics_steps: int = 5
 

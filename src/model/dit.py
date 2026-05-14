@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from src.config.config import ModelConfig
 from src.model.modules import apply_rotary_pos_emb, ModulatedLayerNorm, PhonemeEncoder, SinusoidalPositionEmbeddings, RotaryEmbedding
@@ -127,6 +128,7 @@ class DiTModel(nn.Module):
         """
         super().__init__()
         self.config = config
+        self.gradient_checkpointing = False  # turned off by default, changed in main script
 
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(config.hidden_size),
@@ -232,9 +234,12 @@ class DiTModel(nn.Module):
         rope_cos, rope_sin = self.rope(seq_len, x.device)
 
         for block in self.blocks:
-            x = block(x, cond=t_emb, text_emb=text_emb,
-                      rope_cos=rope_cos, rope_sin=rope_sin,
-                      text_mask=text_mask, mel_pad_mask=mel_pad_mask)
+            if self.gradient_checkpointing and self.training:
+                x = checkpoint(block, x, t_emb, text_emb, rope_cos, rope_sin, text_mask, mel_pad_mask,
+                               use_reentrant=False)
+            else:
+                x = block(x, cond=t_emb, text_emb=text_emb, rope_cos=rope_cos, rope_sin=rope_sin, text_mask=text_mask,
+                          mel_pad_mask=mel_pad_mask)
 
         x = self.final_norm(x, t_emb)
 
