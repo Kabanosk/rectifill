@@ -30,11 +30,20 @@ def sample_euler(
     mask_bool: torch.Tensor,
     num_steps: int = 50,
     cfg_scale: float = 1.0,
+    verbose: bool = True,
     **condition_kwargs
 ) -> torch.Tensor:
     """
-    Solves the ODE using Euler's method to generate the inpainted spectrogram.
-    Starts from t=0 (pure noise) and integrates to t=1 (clean audio).
+    Solves the probability flow ODE using Euler's method to generate an inpainted spectrogram.
+
+    :param model: The DiT velocity prediction model.
+    :param x1_context: Ground truth mel-spectrogram used for contextual conditioning.
+    :param mask_bool: Boolean mask where True indicates the hole to be generated.
+    :param num_steps: Number of integration steps for the Euler ODE solver.
+    :param cfg_scale: Guidance scale for classifier-free guidance (1.0 disables CFG).
+    :param verbose: Whether to display a progress bar during sampling.
+    :param condition_kwargs: Additional conditioning features (e.g., text embeddings, padding masks).
+    :return: Generated and denormalized mel-spectrogram tensor clamped between -1.0 and 1.0.
     """
     device = x1_context.device
     batch_size = x1_context.shape[0]
@@ -45,15 +54,28 @@ def sample_euler(
     dt = 1.0 / num_steps
     mask_float = mask_bool.to(torch.float32)
     x_context = torch.where(mask_bool.expand_as(x1_context), torch.zeros_like(x1_context), x1_context)
+    batched_x_context = torch.cat([x_context, x_context], dim=0)
+    batched_mask_float = torch.cat([mask_float, mask_float], dim=0)
+    batched_condition_kwargs = {}
 
-    uncond_kwargs = {}
     if cfg_scale != 1.0:
-        for k, v in condition_kwargs.items():
-            uncond_kwargs[k] = v
-        uncond_kwargs["cfg_drop_mask"] = torch.ones(batch_size, 1, 1, dtype=torch.bool, device=device)
+        cfg_drop_mask_cond = torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
+        cfg_drop_mask_uncond = torch.ones(batch_size, 1, 1, dtype=torch.bool, device=device)
+        batched_cfg_drop_mask = torch.cat([cfg_drop_mask_cond, cfg_drop_mask_uncond], dim=0)
 
-    condition_kwargs["cfg_drop_mask"] = torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
-    for i in tqdm(range(num_steps), desc="Sampling"):
+
+        for k, v in condition_kwargs.items():
+            if isinstance(v, torch.Tensor):
+                batched_condition_kwargs[k] = torch.cat([v, v], dim=0)
+            else:
+                batched_condition_kwargs[k] = v
+
+        batched_condition_kwargs["cfg_drop_mask"] = batched_cfg_drop_mask
+    else:
+        condition_kwargs["cfg_drop_mask"] = torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
+
+    pbar = tqdm(range(num_steps), desc="Sampling") if verbose else range(num_steps)
+    for i in pbar:
         t_val = i / num_steps
         t = torch.full((batch_size,), t_val, device=device)
 
@@ -61,14 +83,24 @@ def sample_euler(
         x_t_exact_context = t_val * x_context + (1.0 - t_val) * noise_for_context
         x_t = torch.where(mask_bool, x_t, x_t_exact_context)
 
-        with torch.no_grad():
-            v_cond = model(xt=x_t, x_context=x_context, mask=mask_float, t=t, **condition_kwargs)
+        if cfg_scale == 1.0:
+            with torch.no_grad():
+                v_pred = model(xt=x_t, x_context=x_context, mask=mask_float, t=t, **condition_kwargs)
+        else:
+            batched_x_t = torch.cat([x_t, x_t], dim=0)
+            batched_t = torch.cat([t, t], dim=0)
 
-            if cfg_scale == 1.0:
-                v_pred = v_cond
-            else:
-                v_uncond = model(xt=x_t, x_context=x_context, mask=mask_float, t=t, **uncond_kwargs)
-                v_pred = v_uncond + cfg_scale * (v_cond - v_uncond)
+            with torch.no_grad():
+                batched_v = model(
+                    xt=batched_x_t,
+                    x_context=batched_x_context,
+                    mask=batched_mask_float,
+                    t=batched_t,
+                    **batched_condition_kwargs
+                )
+
+            v_cond, v_uncond = batched_v.chunk(2, dim=0)
+            v_pred = v_uncond + cfg_scale * (v_cond - v_uncond)
 
         x_t = x_t + v_pred * dt
 

@@ -1,4 +1,6 @@
 import torch
+from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
+from torchmetrics.audio.stoi import ShortTimeObjectiveIntelligibility
 
 
 def calculate_lsd(pred_mel: torch.Tensor, target_mel: torch.Tensor, mask_bool: torch.Tensor) -> float:
@@ -22,3 +24,27 @@ def calculate_lsd(pred_mel: torch.Tensor, target_mel: torch.Tensor, mask_bool: t
         return 0.0
 
     return masked_lsd.mean().item()
+
+
+def calculate_speech_metrics(pred_wav: torch.Tensor, target_wav: torch.Tensor, sample_rate: int = 16000) -> dict:
+    """
+    Calculates PESQ and STOI metrics for reconstructed waveforms.
+
+    :param pred_wav: Predicted waveform tensor [1, Time]
+    :param target_wav: Ground truth waveform tensor [1, Time]
+    :param sample_rate: Audio sample rate (default 16000)
+    :return: dict with pesq and stoi scores
+    """
+    pred_wav = pred_wav.detach().cpu()
+    target_wav = target_wav.detach().cpu()
+
+    pesq_metric = PerceptualEvaluationSpeechQuality(sample_rate, 'wb')
+    stoi_metric = ShortTimeObjectiveIntelligibility(sample_rate)
+
+    pesq_val = pesq_metric(pred_wav, target_wav).item()
+    stoi_val = stoi_metric(pred_wav, target_wav).item()
+
+    return {
+        "pesq": pesq_val,
+        "stoi": stoi_val
+    }

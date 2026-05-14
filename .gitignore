@@ -9,3 +9,5 @@ checkpoints/
 /outputs/
 /wandb/
 lightning_logs/
+evaluation_results/
+pretrained_models/
