@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import torch
 from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
 from torchmetrics.audio.stoi import ShortTimeObjectiveIntelligibility
@@ -26,6 +28,16 @@ def calculate_lsd(pred_mel: torch.Tensor, target_mel: torch.Tensor, mask_bool: t
     return masked_lsd.mean().item()
 
 
+@lru_cache(maxsize=4)
+def _get_speech_metrics(sample_rate: int):
+    """
+    Initialize metrics only one for each sample_rate, optimizing the evaluation pipeline.
+    """
+    pesq = PerceptualEvaluationSpeechQuality(sample_rate, 'wb')
+    stoi = ShortTimeObjectiveIntelligibility(sample_rate)
+    return pesq, stoi
+
+
 def calculate_speech_metrics(pred_wav: torch.Tensor, target_wav: torch.Tensor, sample_rate: int = 16000) -> dict:
     """
     Calculates PESQ and STOI metrics for reconstructed waveforms.
@@ -38,8 +50,7 @@ def calculate_speech_metrics(pred_wav: torch.Tensor, target_wav: torch.Tensor, s
     pred_wav = pred_wav.detach().cpu()
     target_wav = target_wav.detach().cpu()
 
-    pesq_metric = PerceptualEvaluationSpeechQuality(sample_rate, 'wb')
-    stoi_metric = ShortTimeObjectiveIntelligibility(sample_rate)
+    pesq_metric, stoi_metric = _get_speech_metrics(sample_rate)
 
     pesq_val = pesq_metric(pred_wav, target_wav).item()
     stoi_val = stoi_metric(pred_wav, target_wav).item()

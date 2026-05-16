@@ -235,8 +235,11 @@ class DiTModel(nn.Module):
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
-                x = checkpoint(block, x, t_emb, text_emb, rope_cos, rope_sin, text_mask, mel_pad_mask,
-                               use_reentrant=False)
+                def checkpointed_block(x_in):
+                    return block(x_in, cond=t_emb, text_emb=text_emb, rope_cos=rope_cos, rope_sin=rope_sin,
+                                 text_mask=text_mask, mel_pad_mask=mel_pad_mask)
+
+                x = checkpoint(checkpointed_block, x, use_reentrant=False)
             else:
                 x = block(x, cond=t_emb, text_emb=text_emb, rope_cos=rope_cos, rope_sin=rope_sin, text_mask=text_mask,
                           mel_pad_mask=mel_pad_mask)

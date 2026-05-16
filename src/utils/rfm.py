@@ -43,7 +43,7 @@ def sample_euler(
     :param cfg_scale: Guidance scale for classifier-free guidance (1.0 disables CFG).
     :param verbose: Whether to display a progress bar during sampling.
     :param condition_kwargs: Additional conditioning features (e.g., text embeddings, padding masks).
-    :return: Generated and denormalized mel-spectrogram tensor clamped between -1.0 and 1.0.
+    :return: Generated normalized mel-spectrogram tensor in the [-1.0, 1.0] range.
     """
     device = x1_context.device
     batch_size = x1_context.shape[0]
@@ -63,7 +63,6 @@ def sample_euler(
         cfg_drop_mask_uncond = torch.ones(batch_size, 1, 1, dtype=torch.bool, device=device)
         batched_cfg_drop_mask = torch.cat([cfg_drop_mask_cond, cfg_drop_mask_uncond], dim=0)
 
-
         for k, v in condition_kwargs.items():
             if isinstance(v, torch.Tensor):
                 batched_condition_kwargs[k] = torch.cat([v, v], dim=0)
@@ -72,7 +71,10 @@ def sample_euler(
 
         batched_condition_kwargs["cfg_drop_mask"] = batched_cfg_drop_mask
     else:
-        condition_kwargs["cfg_drop_mask"] = torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
+        condition_kwargs = {
+            **condition_kwargs,
+            "cfg_drop_mask": torch.zeros(batch_size, 1, 1, dtype=torch.bool, device=device)
+        }
 
     pbar = tqdm(range(num_steps), desc="Sampling") if verbose else range(num_steps)
     for i in pbar:

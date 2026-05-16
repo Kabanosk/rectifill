@@ -6,7 +6,7 @@ from pathlib import Path
 from loguru import logger
 from tqdm import tqdm
 
-from src.config.config import DataConfig, TrainConfig
+from src.config.config import DataConfig, MelConfig, ModelConfig, TextConfig, TrainConfig, WandbConfig
 from src.data.dataset import get_dataloader
 from src.data.utils import denormalize_mel, mel_to_waveform, normalize_mel, save_wav, UniversalMasker
 from src.evaluation.metrics import calculate_lsd, calculate_speech_metrics
@@ -34,9 +34,26 @@ def evaluate(checkpoint_path: str, data_path: str, output_dir: str, device: str,
     set_seed(train_config.seed)
 
     model = DiTModel(train_config.model_params).to(device)
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    state_dict = ckpt.get('ema_model_state_dict') or {k.replace('model.', ''): v for k, v in ckpt['state_dict'].items()
-                                                      if k.startswith('model.')}
+
+    torch.serialization.add_safe_globals([
+        TrainConfig,
+        DataConfig,
+        ModelConfig,
+        WandbConfig,
+        MelConfig,
+        TextConfig
+    ])
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
+
+    ema_sd = ckpt.get('ema_model_state_dict')
+    if ema_sd is not None:
+        state_dict = ema_sd
+    else:
+        raw = ckpt.get('state_dict')
+        if raw is None:
+            raise ValueError("Unrecognized checkpoint format — missing 'ema_model_state_dict' and 'state_dict'.")
+        state_dict = {k.replace('model.', ''): v for k, v in raw.items() if k.startswith('model.')}
+
     model.load_state_dict(state_dict)
     model.eval()
 
@@ -87,7 +104,7 @@ def evaluate(checkpoint_path: str, data_path: str, output_dir: str, device: str,
                 pesq_val, stoi_val = speech["pesq"], speech["stoi"]
             except Exception as e:
                 logger.warning(f"Metric error on sample {b}: {e}. Skipping sample scores.")
-                pesq_val, stoi_val = 1.0, 0.0  # Lowest possible scores
+                pesq_val, stoi_val = -0.5, 0.0  # Lowest possible scores
 
             try:
                 pred_text = asr_evaluator.transcribe(pred_wav)

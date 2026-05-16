@@ -115,7 +115,7 @@ def main():
     steps_per_epoch = math.ceil(len(datamodule.train_dataloader()) / train_config.accumulation_steps)
 
     num_devices: int = train_config.devices if isinstance(train_config.devices, int) else 1
-    lit_model = LitRFM(core_model=core_model, config=train_config, steps_per_epoch=steps_per_epoch // num_devices)
+    lit_model = LitRFM(core_model=core_model, config=train_config, steps_per_epoch=math.ceil(steps_per_epoch / num_devices))
 
     total_params = sum(p.numel() for p in core_model.parameters())
     logger.info(f"Model architecture [{train_config.model_name}] initialized. Total Params: {total_params:,}")
