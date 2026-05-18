@@ -198,7 +198,9 @@ class DiTModel(nn.Module):
         mel_pad_mask = kwargs.get("mel_pad_mask", None)
         cfg_drop_mask = kwargs.get("cfg_drop_mask", None)
 
-        is_fully_unconditional = cfg_drop_mask is not None and torch.all(cfg_drop_mask)
+        is_fully_unconditional = False
+        if cfg_drop_mask is not None and not torch.compiler.is_compiling():
+            is_fully_unconditional = torch.all(cfg_drop_mask).item()
 
         if self.config.context_type == "phonemes":
             phoneme_ids = kwargs.get("phoneme_ids", torch.tensor([], device=xt.device))
