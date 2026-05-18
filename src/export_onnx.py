@@ -23,16 +23,8 @@ class RectiFillONNX(torch.nn.Module):
         self.model = model
         self.context_type = context_type
 
-    def forward(
-            self,
-            xt: torch.Tensor,
-            x_context: torch.Tensor,
-            mask: torch.Tensor,
-            t: torch.Tensor,
-            mel_pad_mask: torch.Tensor,
-            context_input: torch.Tensor,
-            text_mask: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, xt: torch.Tensor, x_context: torch.Tensor, mask: torch.Tensor, t: torch.Tensor, mel_pad_mask: torch.Tensor,
+                context_input: torch.Tensor, text_mask: torch.Tensor, cfg_drop_mask: torch.Tensor) -> torch.Tensor:
         """
         Performs the forward pass of the wrapped DiT model.
 
@@ -43,6 +35,7 @@ class RectiFillONNX(torch.nn.Module):
         :param mel_pad_mask: The padding mask for the mel-spectrogram, shape (batch_size, time_frames).
         :param context_input: The context representation (phoneme IDs or T5 embeddings).
         :param text_mask: The padding mask for the text context, shape (batch_size, seq_len).
+        :param cfg_drop_mask: The boolean mask for Classifier-Free Guidance dropping, shape (batch_size, 1, 1).
 
         :return: The predicted velocity field tensor.
         """
@@ -50,7 +43,7 @@ class RectiFillONNX(torch.nn.Module):
             "t": t,
             "mel_pad_mask": mel_pad_mask,
             "text_mask": text_mask,
-            "cfg_drop_mask": None
+            "cfg_drop_mask": cfg_drop_mask
         }
 
         if self.context_type == "phonemes":
@@ -113,6 +106,7 @@ def export_to_onnx(checkpoint_path: str, output_path: str):
     t = torch.tensor([0.5], dtype=torch.float32)
     mel_pad_mask = torch.zeros(batch_size, time_frames, dtype=torch.bool)
     text_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
+    cfg_drop_mask = torch.zeros(batch_size, 1, 1, dtype=torch.bool)
 
     if context_type == "phonemes":
         context_input = torch.randint(0, train_config.model_params.phoneme_vocab_size, (batch_size, seq_len),
@@ -120,7 +114,7 @@ def export_to_onnx(checkpoint_path: str, output_path: str):
     else:
         context_input = torch.randn(batch_size, seq_len, train_config.model_params.text_dim)
 
-    dummy_inputs = (xt, x_context, mask, t, mel_pad_mask, context_input, text_mask)
+    dummy_inputs = (xt, x_context, mask, t, mel_pad_mask, context_input, text_mask, cfg_drop_mask)
 
     dynamic_axes = {
         'xt': {0: 'batch_size', 2: 'time_frames'},
@@ -130,10 +124,11 @@ def export_to_onnx(checkpoint_path: str, output_path: str):
         'mel_pad_mask': {0: 'batch_size', 1: 'time_frames'},
         'context_input': {0: 'batch_size', 1: 'seq_len'},
         'text_mask': {0: 'batch_size', 1: 'seq_len'},
+        'cfg_drop_mask': {0: 'batch_size'},
         'output_velocity': {0: 'batch_size', 2: 'time_frames'}
     }
 
-    input_names = ['xt', 'x_context', 'mask', 't', 'mel_pad_mask', 'context_input', 'text_mask']
+    input_names = ['xt', 'x_context', 'mask', 't', 'mel_pad_mask', 'context_input', 'text_mask', 'cfg_drop_mask']
     output_names = ['output_velocity']
 
     logger.info("Exporting to ONNX...")
@@ -143,7 +138,7 @@ def export_to_onnx(checkpoint_path: str, output_path: str):
         dummy_inputs,
         output_path,
         export_params=True,
-        opset_version=17,
+        opset_version=18,
         do_constant_folding=True,
         input_names=input_names,
         output_names=output_names,

@@ -49,14 +49,14 @@ class ModelConfig:
     context_type: Literal["t5", "phonemes"] = "phonemes"
 
     # Architecture dimensions
-    hidden_size: int = 384
-    depth: int = 6
-    num_heads: int = 6
+    hidden_size: int = 512
+    depth: int = 8
+    num_heads: int = 8
     dropout: float = 0.2
 
     # Audio & Text
     mel_bins: int = 80
-    text_dim: int = 768
+    text_dim: int = 512
     max_seq_len: int = 4000
 
     # Phonemes
