@@ -103,7 +103,7 @@ def export_to_onnx(checkpoint_path: str, output_path: str):
     xt = torch.randn(batch_size, mel_bins, time_frames)
     x_context = torch.randn(batch_size, mel_bins, time_frames)
     mask = torch.zeros(batch_size, 1, time_frames, dtype=torch.float32)
-    t = t = torch.full((batch_size,), 0.5, dtype=torch.float32)
+    t = torch.full((batch_size,), 0.5, dtype=torch.float32)
     mel_pad_mask = torch.zeros(batch_size, time_frames, dtype=torch.bool)
     text_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
     cfg_drop_mask = torch.zeros(batch_size, 1, 1, dtype=torch.bool)

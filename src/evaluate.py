@@ -33,18 +33,27 @@ class ONNXModelWrapper:
                  **kwargs) -> torch.Tensor:
         context_input = kwargs['phoneme_ids'] if 'phoneme_ids' in kwargs else kwargs['text_emb']
         cfg_drop_mask = kwargs.get('cfg_drop_mask')
+        mel_pad_mask = kwargs.get('mel_pad_mask')
+        text_mask = kwargs.get('text_mask')
 
         if cfg_drop_mask is None:
             cfg_drop_mask = torch.zeros(xt.shape[0], 1, 1, dtype=torch.bool, device=xt.device)
+
+        if mel_pad_mask is None:
+            mel_pad_mask = torch.zeros_like(mask, dtype=torch.bool, device=xt.device)
+
+        if text_mask is None:
+            text_mask = torch.zeros(context_input.shape[0], context_input.shape[1], dtype=torch.bool,
+                                    device=xt.device)
 
         inputs = {
             "xt": xt.cpu().numpy(),
             "x_context": x_context.cpu().numpy(),
             "mask": mask.cpu().numpy(),
             "t": t.cpu().numpy(),
-            "mel_pad_mask": kwargs['mel_pad_mask'].cpu().numpy(),
+            "mel_pad_mask": mel_pad_mask.cpu().numpy(),
             "context_input": context_input.cpu().numpy(),
-            "text_mask": kwargs['text_mask'].cpu().numpy(),
+            "text_mask": text_mask.cpu().numpy(),
             "cfg_drop_mask": cfg_drop_mask.cpu().numpy()
         }
 
@@ -81,7 +90,7 @@ def evaluate(ckpt_path: str, onnx_path: str, data_path: str, output_dir: str, de
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
 
         ema_sd = ckpt.get('ema_model_state_dict')
-        state_dict = ema_sd if ema_sd is not None else {k.replace('model.', ''): v for k, v in
+        state_dict = ema_sd if ema_sd is not None else {k.removeprefix('model.'): v for k, v in
                                                         ckpt.get('state_dict').items() if k.startswith('model.')}
         model.load_state_dict(state_dict)
         model.eval()
