@@ -8,7 +8,7 @@ from loguru import logger
 
 from src.config.config import DataConfig, TrainConfig
 from src.data.dataset import get_dataloader
-from src.data.utils import denormalize_mel, mel_to_waveform, normalize_mel, save_wav
+from src.data.utils import denormalize_mel, mel_to_waveform, normalize_mel, save_wav, UniversalMasker
 from src.model.dit import DiTModel
 from src.utils.rfm import sample_euler
 
@@ -26,6 +26,9 @@ def visualize_and_listen(checkpoint_path: str):
     train_config = TrainConfig()
 
     val_loader = get_dataloader(data_config)
+    val_loader.dataset.mask_generator = UniversalMasker(
+        p_tts=0.0, p_continuation=0.0, p_prefix=0.0, p_inpainting=1.0, min_tokens_inpaint=10, max_tokens_inpaint=20
+    )
     batch = next(iter(val_loader))
 
     model = DiTModel(train_config.model_params).to(device)
@@ -71,7 +74,7 @@ def visualize_and_listen(checkpoint_path: str):
 
     generated_mel_db = denormalize_mel(generated_mel_norm)
     masked_mel_db = mel_raw.clone()
-    masked_mel_db = torch.where(mask_bool.expand_as(masked_mel_db), torch.tensor(-100.0, device=device), masked_mel_db)
+    masked_mel_db = torch.where(mask_bool.expand_as(masked_mel_db), torch.tensor(-23.0, device=device), masked_mel_db)
     original_np = mel_raw[0].cpu().numpy()
     masked_np = masked_mel_db[0].cpu().numpy()
     generated_np = generated_mel_db[0].cpu().numpy()

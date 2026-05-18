@@ -8,8 +8,11 @@ class MelConfig:
     """Configuration for Log-Mel-Spectrogram transformation."""
     sample_rate: int = 16000
     n_fft: int = 1024
-    hop_length: int = 512
+    hop_length: int = 256
+    win_length: int = 1024
     n_mels: int = 80
+    f_min: float = 0.0
+    f_max: float = 8000.0
 
 
 @dataclasses.dataclass
@@ -33,8 +36,7 @@ class DataConfig:
     mel_params: MelConfig = dataclasses.field(default_factory=MelConfig)
     text_params: TextConfig = dataclasses.field(default_factory=TextConfig)
 
-    # E.g., 30 seconds of audio = (30 * 16000) / 512 = ~937 frames.
-    max_mel_length: int = 1000
+    max_mel_length: int = 1875
 
 
 @dataclasses.dataclass
@@ -49,14 +51,14 @@ class ModelConfig:
     context_type: Literal["t5", "phonemes"] = "phonemes"
 
     # Architecture dimensions
-    hidden_size: int = 384
-    depth: int = 6
-    num_heads: int = 6
+    hidden_size: int = 512
+    depth: int = 8
+    num_heads: int = 8
     dropout: float = 0.2
 
     # Audio & Text
     mel_bins: int = 80
-    text_dim: int = 768
+    text_dim: int = 512
     max_seq_len: int = 4000
 
     # Phonemes
@@ -70,7 +72,7 @@ class TrainConfig:
     """Configuration for the training process. """
     model_name: str = "rfm_dit"
     device: str = "cuda"
-    checkpoint_path: str = "checkpoints/base"
+    checkpoint_path: str = "checkpoints/base_rope_360"
     log_interval: int = 100
     epochs: int = 100
     seed: int = 42
@@ -78,11 +80,12 @@ class TrainConfig:
     learning_rate: float = 1e-4
     # for lr scheduler
     eta_min: float = 1e-6
-    warmup_steps: int = 1000
+    warmup_steps: int = 1500
 
     weight_decay: float = 1e-2
     gradient_clip_val: float = 1.0
-    accumulation_steps: int = 32  # for gradient accumulation
+    accumulation_steps: int = 4  # for gradient accumulation
+    gradient_checkpointing: bool = False
 
     validation_metrics_steps: int = 5
 
