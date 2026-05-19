@@ -29,8 +29,22 @@ class ONNXModelWrapper:
         active_provider = self.session.get_providers()[0]
         logger.info(f"Loaded ONNX Model on: {active_provider}")
 
-    def __call__(self, xt: torch.Tensor, x_context: torch.Tensor, mask: torch.Tensor, t: torch.Tensor,
-                 **kwargs) -> torch.Tensor:
+    def __call__(self, xt: torch.Tensor, x_context: torch.Tensor, mask: torch.Tensor, t: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        Run inference on the ONNX model.
+
+        Automatically uses GPU-optimized IO Bindings when running on CUDA,
+        avoiding unnecessary memory copies between GPU and CPU. Falls back
+        to standard CPU inference otherwise.
+
+        :param xt: Noisy mel-spectrogram, shape (batch, mel_bins, time_frames).
+        :param x_context: Context mel-spectrogram, shape (batch, mel_bins, time_frames).
+        :param mask: Inpainting region mask, shape (batch, 1, time_frames).
+        :param t: Diffusion timestep, shape (batch,).
+        :param kwargs: Additional inputs: mel_pad_mask, text_mask, phoneme_ids or text_emb,
+                       and optionally cfg_drop_mask.
+        :return: Predicted velocity field, shape (batch, mel_bins, time_frames).
+        """
         context_input = kwargs['phoneme_ids'] if 'phoneme_ids' in kwargs else kwargs['text_emb']
         cfg_drop_mask = kwargs.get('cfg_drop_mask')
         mel_pad_mask = kwargs.get('mel_pad_mask')
@@ -43,27 +57,46 @@ class ONNXModelWrapper:
             mel_pad_mask = torch.zeros_like(mask, dtype=torch.bool, device=xt.device)
 
         if text_mask is None:
-            text_mask = torch.zeros(context_input.shape[0], context_input.shape[1], dtype=torch.bool,
-                                    device=xt.device)
+            text_mask = torch.zeros(context_input.shape[0], context_input.shape[1], dtype=torch.bool, device=xt.device)
 
-        inputs = {
-            "xt": xt.cpu().numpy(),
-            "x_context": x_context.cpu().numpy(),
-            "mask": mask.cpu().numpy(),
-            "t": t.cpu().numpy(),
-            "mel_pad_mask": mel_pad_mask.cpu().numpy(),
-            "context_input": context_input.cpu().numpy(),
-            "text_mask": text_mask.cpu().numpy(),
-            "cfg_drop_mask": cfg_drop_mask.cpu().numpy()
+        named_inputs = [
+            ("xt", xt),
+            ("x_context", x_context),
+            ("mask", mask),
+            ("t", t),
+            ("mel_pad_mask", mel_pad_mask),
+            ("context_input", context_input),
+            ("text_mask", text_mask),
+            ("cfg_drop_mask", cfg_drop_mask),
+        ]
+
+        use_cuda = self.session.get_providers()[0] == 'CUDAExecutionProvider'
+        DTYPE_MAP: dict = {
+            torch.float32: np.float32,
+            torch.int64: np.int64,
+            torch.bool: np.bool_,
         }
 
-        outputs = self.session.run(["output_velocity"], inputs)
-        return torch.from_numpy(outputs[0]).to(xt.device)
+        if use_cuda:
+            io = self.session.io_binding()
+            for name, tensor in named_inputs:
+                tensor = tensor.contiguous()
+                dtype = DTYPE_MAP[tensor.dtype]
+                io.bind_input(name, device_type="cuda", device_id=0, element_type=dtype, shape=tuple(tensor.shape),
+                              buffer_ptr=tensor.data_ptr())
+
+            io.bind_output("output_velocity", device_type="cuda")
+            self.session.run_with_iobinding(io)
+
+            return torch.from_numpy(io.get_outputs()[0].numpy()).to(xt.device)
+        else:
+            inputs = {name: tensor.cpu().numpy() for name, tensor in named_inputs}
+            outputs = self.session.run(["output_velocity"], inputs)
+            return torch.from_numpy(outputs[0])
 
 
 @torch.no_grad()
-def evaluate(ckpt_path: str, onnx_path: str, data_path: str, output_dir: str, device: str, min_mask: int,
-             max_mask: int):
+def evaluate(ckpt_path: str, onnx_path: str, data_path: str, output_dir: str, device: str, min_mask: int, max_mask: int):
     output_dir_path = Path(output_dir)
     samples_dir = output_dir_path / ("best_samples_onnx" if onnx_path else "best_samples")
     samples_dir.mkdir(parents=True, exist_ok=True)
