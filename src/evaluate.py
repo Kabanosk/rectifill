@@ -21,9 +21,10 @@ class ONNXModelWrapper:
     def __init__(self, onnx_path: str):
         import onnxruntime as ort
         available_providers = ort.get_available_providers()
-        providers = ['CPUExecutionProvider']
+        providers = []
         if 'CUDAExecutionProvider' in available_providers:
             providers.append('CUDAExecutionProvider')
+        providers.append('CPUExecutionProvider')
 
         self.session = ort.InferenceSession(onnx_path, providers=providers)
         active_provider = self.session.get_providers()[0]
