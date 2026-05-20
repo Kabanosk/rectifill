@@ -8,13 +8,22 @@ def prepare_rfm_batch(
     """
     Samples time t, generates noise x0, and computes the intermediate state xt
     and target velocity for Rectified Flow Matching.
+
+    :param x1: Normalized mel-spectrogram in [-1, 1] range. Shape: [Batch, Mel_Bins, Time].
+    :param mask_bool: Boolean mask where True indicates the hole region. Shape: [Batch, 1, Time].
+    :param device: Target device for tensor operations.
+    :return: Tuple of (xt, x_context, target_v, t) where:
+        - xt: Interpolated noisy mel at timestep t. Shape: [Batch, Mel_Bins, Time].
+        - x_context: Normalized mel with hole filled with -1.0 (silence). Shape: [Batch, Mel_Bins, Time].
+        - target_v: Target velocity (x1 - x0) in hole regions, zeros elsewhere. Shape: [Batch, Mel_Bins, Time].
+        - t: Sampled timesteps in [0, 1]. Shape: [Batch].
     """
     batch_size = x1.shape[0]
     t = torch.rand((batch_size,), device=device)
     t_expanded = t.view(-1, 1, 1)
 
     x0 = torch.randn_like(x1)
-    x_context = torch.where(mask_bool.expand_as(x1), torch.zeros_like(x1), x1)
+    x_context = torch.where(mask_bool.expand_as(x1), torch.full_like(x1, -1.0), x1)
 
     # Context condition
     xt = t_expanded * x1 + (1.0 - t_expanded) * x0
@@ -37,13 +46,13 @@ def sample_euler(
     Solves the probability flow ODE using Euler's method to generate an inpainted spectrogram.
 
     :param model: The DiT velocity prediction model.
-    :param x1_context: Ground truth mel-spectrogram used for contextual conditioning.
+    :param x1_context: Normalized mel-spectrogram in [-1, 1] used for contextual conditioning.
     :param mask_bool: Boolean mask where True indicates the hole to be generated.
-    :param num_steps: Number of integration steps for the Euler ODE solver.
-    :param cfg_scale: Guidance scale for classifier-free guidance (1.0 disables CFG).
+    :param num_steps: Number of Euler integration steps (default: 50).
+    :param cfg_scale: Classifier-free guidance scale. 1.0 disables CFG.
     :param verbose: Whether to display a progress bar during sampling.
-    :param condition_kwargs: Additional conditioning features (e.g., text embeddings, padding masks).
-    :return: Generated normalized mel-spectrogram tensor in the [-1.0, 1.0] range.
+    :param condition_kwargs: Additional conditioning features (phoneme_ids, text_mask, mel_pad_mask, cfg_drop_mask).
+    :return: Generated normalized mel-spectrogram in [-1, 1].
     """
     device = x1_context.device
     batch_size = x1_context.shape[0]
@@ -53,7 +62,7 @@ def sample_euler(
 
     dt = 1.0 / num_steps
     mask_float = mask_bool.to(torch.float32)
-    x_context = torch.where(mask_bool.expand_as(x1_context), torch.zeros_like(x1_context), x1_context)
+    x_context = torch.where(mask_bool.expand_as(x1_context), torch.full_like(x1_context, -1.0), x1_context)
     batched_x_context = torch.cat([x_context, x_context], dim=0)
     batched_mask_float = torch.cat([mask_float, mask_float], dim=0)
     batched_condition_kwargs = {}

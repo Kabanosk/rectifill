@@ -106,7 +106,7 @@ def evaluate(ckpt_path: str, onnx_path: str, data_path: str, output_dir: str, de
     test_loader = get_dataloader(data_config)
 
     test_loader.dataset.mask_generator = UniversalMasker(
-        p_tts=0.0, p_continuation=0.0, p_prefix=0.0, p_inpainting=1.0,
+        p_continuation=0.0, p_prefix=0.0, p_inpainting=1.0,
         min_tokens_inpaint=min_mask, max_tokens_inpaint=max_mask
     )
 
