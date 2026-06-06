@@ -106,6 +106,7 @@ class PhonemeEncoderBlock(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_dim)
         self.qkv_proj = nn.Linear(hidden_dim, hidden_dim * 3)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout = dropout
 
         self.norm2 = nn.LayerNorm(hidden_dim)
         self.ffn = nn.Sequential(
@@ -136,7 +137,7 @@ class PhonemeEncoderBlock(nn.Module):
         attn_out = F.scaled_dot_product_attention(
             q, k, v,
             attn_mask=attn_mask,
-            dropout_p=0.1 if self.training else 0.0
+            dropout_p=self.dropout if self.training else 0.0
         )
 
         x = x + self.out_proj(attn_out.transpose(1, 2).reshape(B, L, C))

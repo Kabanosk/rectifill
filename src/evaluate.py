@@ -21,9 +21,10 @@ class ONNXModelWrapper:
     def __init__(self, onnx_path: str):
         import onnxruntime as ort
         available_providers = ort.get_available_providers()
-        providers = ['CUDAExecutionProvider',
-                     'CPUExecutionProvider'] if 'CUDAExecutionProvider' in available_providers else [
-            'CPUExecutionProvider']
+        providers = []
+        if 'CUDAExecutionProvider' in available_providers:
+            providers.append('CUDAExecutionProvider')
+        providers.append('CPUExecutionProvider')
 
         self.session = ort.InferenceSession(onnx_path, providers=providers)
         active_provider = self.session.get_providers()[0]
@@ -106,7 +107,7 @@ def evaluate(ckpt_path: str, onnx_path: str, data_path: str, output_dir: str, de
     test_loader = get_dataloader(data_config)
 
     test_loader.dataset.mask_generator = UniversalMasker(
-        p_tts=0.0, p_continuation=0.0, p_prefix=0.0, p_inpainting=1.0,
+        p_continuation=0.0, p_prefix=0.0, p_inpainting=1.0,
         min_tokens_inpaint=min_mask, max_tokens_inpaint=max_mask
     )
 

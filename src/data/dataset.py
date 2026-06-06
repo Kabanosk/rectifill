@@ -115,12 +115,11 @@ class LibriSpeechDataset(Dataset):
         self.context_type = context_type
 
         self.mask_generator = UniversalMasker(
-            p_tts=0.20,
-            p_continuation=0.15,
-            p_prefix=0.15,
+            p_continuation=0.25,
+            p_prefix=0.25,
             p_inpainting=0.50,
             min_tokens_inpaint=2,
-            max_tokens_inpaint=15
+            max_tokens_inpaint=50
         )
 
         if not self.metadata_path.exists():
